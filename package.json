@@ -1,0 +1,57 @@
+{
+  "name": "learning-modules",
+  "version": "1.0.0",
+  "description": "Interaktive Lernmodule mit H5P - Electron Desktop App",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "env -u ELECTRON_RUN_AS_NODE electron --no-sandbox --ozone-platform=x11 .",
+    "build": "electron-builder",
+    "build:linux": "electron-builder --linux",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac"
+  },
+  "keywords": [
+    "h5p",
+    "learning",
+    "education",
+    "electron"
+  ],
+  "author": "mmetzler-fes",
+  "license": "MIT",
+  "dependencies": {
+    "electron": "^41.0.3",
+    "h5p-standalone": "^3.8.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "com.learningmodules.app",
+    "productName": "LearningModules",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "node_modules/**/*"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Education"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    }
+  }
+}

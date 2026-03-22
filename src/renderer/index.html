@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LearningModules</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <h1 class="app-title">📚 LernModule</h1>
+    </div>
+    <nav class="sidebar-nav">
+      <button class="nav-btn active" data-view="dashboard">
+        <span class="nav-icon">🏠</span> Dashboard
+      </button>
+      <button class="nav-btn" data-view="modules">
+        <span class="nav-icon">📦</span> Meine Module
+      </button>
+      <button class="nav-btn" data-view="create">
+        <span class="nav-icon">➕</span> Modul erstellen
+      </button>
+      <button class="nav-btn" data-view="import-export">
+        <span class="nav-icon">🔄</span> Import / Export
+      </button>
+    </nav>
+    <div class="sidebar-footer">
+      <span class="version-label">v1.0.0</span>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main-content" id="mainContent">
+
+    <!-- Dashboard View -->
+    <section class="view active" id="view-dashboard">
+      <div class="view-header">
+        <h2>Dashboard</h2>
+        <p class="subtitle">Willkommen bei LearningModules — Ihre interaktive Lernplattform</p>
+      </div>
+      <div class="stats-grid" id="statsGrid">
+        <div class="stat-card">
+          <div class="stat-number" id="statTotal">0</div>
+          <div class="stat-label">Module gesamt</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-number" id="statTypes">0</div>
+          <div class="stat-label">Verschiedene Typen</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-number" id="statRecent">0</div>
+          <div class="stat-label">Kürzlich erstellt</div>
+        </div>
+      </div>
+      <div class="section-title">
+        <h3>Verfügbare H5P-Modultypen</h3>
+      </div>
+      <div class="type-grid" id="typeGrid"></div>
+    </section>
+
+    <!-- Modules List View -->
+    <section class="view" id="view-modules">
+      <div class="view-header">
+        <h2>Meine Module</h2>
+        <div class="header-actions">
+          <input type="text" id="searchModules" class="search-input" placeholder="Module durchsuchen..." />
+          <select id="filterType" class="filter-select">
+            <option value="">Alle Typen</option>
+          </select>
+        </div>
+      </div>
+      <div class="modules-list" id="modulesList">
+        <div class="empty-state" id="emptyModules">
+          <span class="empty-icon">📭</span>
+          <p>Noch keine Module erstellt.</p>
+          <button class="btn btn-primary" onclick="window.appNavigate('create')">Erstes Modul erstellen</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Create Module View -->
+    <section class="view" id="view-create">
+      <div class="view-header">
+        <h2 id="createViewTitle">Neues Modul erstellen</h2>
+      </div>
+      <form id="moduleForm" class="module-form">
+        <input type="hidden" id="moduleId" />
+
+        <div class="form-group">
+          <label for="moduleTitle">Titel *</label>
+          <input type="text" id="moduleTitle" required placeholder="Titel des Lernmoduls eingeben..." />
+        </div>
+
+        <div class="form-group">
+          <label for="moduleType">H5P-Modultyp *</label>
+          <select id="moduleType" required>
+            <option value="">— Modultyp wählen —</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="moduleDescription">Beschreibung</label>
+          <textarea id="moduleDescription" rows="3" placeholder="Optionale Beschreibung..."></textarea>
+        </div>
+
+        <!-- Dynamic content editor area -->
+        <div id="contentEditor" class="content-editor"></div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary" id="btnSaveModule">Modul speichern</button>
+          <button type="button" class="btn btn-secondary" id="btnCancelModule">Abbrechen</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Import/Export View -->
+    <section class="view" id="view-import-export">
+      <div class="view-header">
+        <h2>Import / Export</h2>
+      </div>
+      <div class="ie-grid">
+        <div class="ie-card">
+          <div class="ie-icon">📥</div>
+          <h3>Module importieren</h3>
+          <p>Laden Sie eine JSON-Datei mit Lernmodulen, um diese in Ihre Bibliothek aufzunehmen.</p>
+          <button class="btn btn-primary" id="btnImport">JSON importieren</button>
+        </div>
+        <div class="ie-card">
+          <div class="ie-icon">📤</div>
+          <h3>Module exportieren</h3>
+          <p>Exportieren Sie alle oder ausgewählte Module als JSON-Datei zum Teilen oder Sichern.</p>
+          <button class="btn btn-primary" id="btnExportAll">Alle exportieren</button>
+        </div>
+      </div>
+      <div id="importResult" class="import-result" style="display:none;"></div>
+    </section>
+
+    <!-- H5P Player View (for previewing modules) -->
+    <section class="view" id="view-player">
+      <div class="view-header">
+        <div class="player-header">
+          <button class="btn btn-secondary btn-back" id="btnBackFromPlayer">← Zurück</button>
+          <h2 id="playerTitle">Modul-Vorschau</h2>
+        </div>
+      </div>
+      <div id="h5pContainer" class="h5p-container"></div>
+    </section>
+
+  </main>
+
+  <!-- Toast notification container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="js/h5p-types.js"></script>
+  <script src="js/content-editors.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
