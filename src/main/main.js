@@ -2,6 +2,14 @@ const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+
+// Linux: disable GPU/hardware acceleration to prevent SIGSEGV crashes
+if (process.platform === 'linux') {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch('no-sandbox');
+  app.commandLine.appendSwitch('disable-gpu');
+  app.commandLine.appendSwitch('disable-gpu-sandbox');
+}
 const express = require('express');
 const QRCode = require('qrcode');
 
