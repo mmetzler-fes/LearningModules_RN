@@ -1,6 +1,9 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const express = require('express');
+const QRCode = require('qrcode');
 
 const DATA_DIR = path.join(app.getPath('userData'), 'learning-modules');
 const DB_FILE = path.join(DATA_DIR, 'database.json');
@@ -55,6 +58,120 @@ function saveDB(db) {
 }
 
 let mainWindow;
+const WEB_PORT = 3000;
+let webServerUrl = null;
+
+// --- Network helpers ---
+function getLocalIPs() {
+  const interfaces = os.networkInterfaces();
+  const ips = [];
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        ips.push(iface.address);
+      }
+    }
+  }
+  return ips;
+}
+
+// --- Embedded Web Server for WLAN access ---
+function startWebServer() {
+  const web = express();
+  const rendererDir = path.join(__dirname, '../renderer');
+  const assetsDir = path.join(__dirname, '../../assets');
+
+  // REST API for read-only student access
+  web.get('/api/selected-topics', (_req, res) => {
+    const db = loadDB();
+    const selected = (db.topics || []).filter((t) => t.selected !== false);
+    // Return topics with only selected modules
+    const cleaned = selected.map((topic) => ({
+      ...topic,
+      modules: (topic.modules || []).filter((m) => m.moduleSelected !== false),
+    }));
+    res.json(cleaned);
+  });
+
+  web.get('/api/topics/:topicId/modules', (req, res) => {
+    const db = loadDB();
+    const topic = (db.topics || []).find((t) => t.id === req.params.topicId);
+    if (!topic) return res.json([]);
+    res.json((topic.modules || []).filter((m) => m.moduleSelected !== false));
+  });
+
+  web.get('/api/student-selections/:username', (req, res) => {
+    const db = loadDB();
+    res.json(db.studentSelectedTopics[req.params.username] || []);
+  });
+
+  web.post('/api/student-selections/:username', express.json({ limit: '1mb' }), (req, res) => {
+    const db = loadDB();
+    if (!db.studentSelectedTopics) db.studentSelectedTopics = {};
+    db.studentSelectedTopics[req.params.username] = req.body.topicIds || [];
+    saveDB(db);
+    res.json({ success: true });
+  });
+
+  web.post('/api/quiz-result', express.json({ limit: '10mb' }), (req, res) => {
+    const db = loadDB();
+    const resultData = req.body;
+    resultData.id = db.nextResultId++;
+    resultData.timestamp = new Date().toISOString();
+    db.results.push(resultData);
+    saveDB(db);
+    res.json({ success: true, id: resultData.id });
+  });
+
+  // QR code endpoint — generates SVG dynamically
+  web.get('/api/qrcode.svg', async (_req, res) => {
+    if (!webServerUrl) return res.status(503).send('Server not ready');
+    try {
+      const svg = await QRCode.toString(webServerUrl, { type: 'svg', margin: 1 });
+      res.type('image/svg+xml').send(svg);
+    } catch (e) {
+      res.status(500).send('QR generation failed');
+    }
+  });
+
+  // Serve static assets (images in content use data: URLs, but we need CSS/JS/icons)
+  web.use('/assets', express.static(assetsDir));
+  web.use(express.static(rendererDir));
+
+  // Fallback: serve index.html for SPA-style routing
+  web.get('*', (_req, res) => {
+    res.sendFile(path.join(rendererDir, 'index.html'));
+  });
+
+  const server = web.listen(WEB_PORT, '0.0.0.0', () => {
+    const ips = getLocalIPs();
+    const port = server.address().port;
+    if (ips.length > 0) {
+      webServerUrl = `http://${ips[0]}:${port}`;
+      console.log(`Web-Server gestartet: ${webServerUrl}`);
+    } else {
+      webServerUrl = `http://localhost:${port}`;
+      console.log(`Web-Server gestartet (nur lokal): ${webServerUrl}`);
+    }
+  });
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.log(`Port ${WEB_PORT} belegt, versuche alternativen Port...`);
+      const altServer = web.listen(0, '0.0.0.0', () => {
+        const ips = getLocalIPs();
+        const port = altServer.address().port;
+        if (ips.length > 0) {
+          webServerUrl = `http://${ips[0]}:${port}`;
+        } else {
+          webServerUrl = `http://localhost:${port}`;
+        }
+        console.log(`Web-Server gestartet auf alternativem Port: ${webServerUrl}`);
+      });
+    } else {
+      console.error('Web-Server Fehler:', err.message);
+    }
+  });
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -222,6 +339,17 @@ ipcMain.handle('delete-module', (_event, topicId, moduleId) => {
   return { success: true };
 });
 
+ipcMain.handle('toggle-module-selection', (_event, topicId, moduleId, selected) => {
+  const db = loadDB();
+  const topic = db.topics.find((t) => t.id === topicId);
+  if (!topic) return { success: false };
+  const mod = (topic.modules || []).find((m) => m.id === moduleId);
+  if (!mod) return { success: false };
+  mod.moduleSelected = selected;
+  saveDB(db);
+  return { success: true };
+});
+
 // --- IPC: Export/Import (per topic) ---
 
 ipcMain.handle('export-topic', async (_event, topicId) => {
@@ -236,13 +364,15 @@ ipcMain.handle('export-topic', async (_event, topicId) => {
   });
   if (canceled || !filePath) return { success: false };
 
+  const allModules = topic.modules || [];
+  const selectedModules = allModules.filter((m) => m.moduleSelected !== false);
   const exportData = {
     exportVersion: '2.0',
     exportDate: new Date().toISOString(),
     topic: {
       title: topic.title,
       description: topic.description,
-      modules: topic.modules || [],
+      modules: selectedModules,
     },
   };
   fs.writeFileSync(filePath, JSON.stringify(exportData, null, 2), 'utf-8');
@@ -296,6 +426,59 @@ ipcMain.handle('import-topic', async () => {
   }
 
   return { success: false, error: 'Ungültiges Export-Format' };
+});
+
+ipcMain.handle('import-modules-to-topic', async (_event, topicId) => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: 'Module importieren',
+    filters: [{ name: 'JSON-Dateien', extensions: ['json'] }],
+    properties: ['openFile'],
+  });
+  if (canceled || filePaths.length === 0) return { success: false };
+
+  const raw = fs.readFileSync(filePaths[0], 'utf-8');
+  let importData;
+  try {
+    importData = JSON.parse(raw);
+  } catch {
+    return { success: false, error: 'Ungültiges JSON-Format' };
+  }
+
+  let importModules = [];
+  if (importData.topic && importData.topic.modules) {
+    importModules = importData.topic.modules;
+  } else if (importData.modules && Array.isArray(importData.modules)) {
+    importModules = importData.modules;
+  }
+  if (importModules.length === 0) {
+    return { success: false, error: 'Keine Module in der Datei gefunden' };
+  }
+
+  return {
+    success: true,
+    modules: importModules.map((m) => ({
+      id: m.id,
+      title: m.title,
+      type: m.type,
+      description: m.description || '',
+    })),
+    _fullModules: importModules,
+  };
+});
+
+ipcMain.handle('confirm-import-modules', (_event, topicId, modules) => {
+  const db = loadDB();
+  const topic = db.topics.find((t) => t.id === topicId);
+  if (!topic) return { success: false, error: 'Thema nicht gefunden' };
+  if (!topic.modules) topic.modules = [];
+
+  for (const mod of modules) {
+    mod.id = 'mod_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+    mod.moduleSelected = true;
+    topic.modules.push(mod);
+  }
+  saveDB(db);
+  return { success: true, importedCount: modules.length };
 });
 
 // --- IPC: Student topic selection ---
@@ -352,6 +535,38 @@ ipcMain.handle('get-h5p-content-path', () => {
   return path.join(__dirname, '../../h5p-content');
 });
 
+ipcMain.handle('select-image', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: 'Bild auswählen',
+    filters: [{ name: 'Bilder', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'] }],
+    properties: ['openFile'],
+  });
+  if (canceled || filePaths.length === 0) return { success: false };
+  const filePath = filePaths[0];
+  const ext = path.extname(filePath).toLowerCase().replace('.', '');
+  const mimeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp', svg: 'image/svg+xml' };
+  const mime = mimeMap[ext] || 'image/png';
+  const data = fs.readFileSync(filePath);
+  const base64 = data.toString('base64');
+  return { success: true, dataUrl: `data:${mime};base64,${base64}` };
+});
+
+ipcMain.handle('select-audio', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: 'Audio auswählen',
+    filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'ogg', 'aac', 'm4a', 'webm'] }],
+    properties: ['openFile'],
+  });
+  if (canceled || filePaths.length === 0) return { success: false };
+  const filePath = filePaths[0];
+  const ext = path.extname(filePath).toLowerCase().replace('.', '');
+  const mimeMap = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', aac: 'audio/aac', m4a: 'audio/mp4', webm: 'audio/webm' };
+  const mime = mimeMap[ext] || 'audio/mpeg';
+  const data = fs.readFileSync(filePath);
+  const base64 = data.toString('base64');
+  return { success: true, dataUrl: `data:${mime};base64,${base64}` };
+});
+
 ipcMain.on('focus-window', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.focus();
@@ -359,9 +574,16 @@ ipcMain.on('focus-window', () => {
   }
 });
 
+ipcMain.handle('get-web-server-url', () => {
+  return webServerUrl;
+});
+
 // --- App lifecycle ---
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+  startWebServer();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

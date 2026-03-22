@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src * data:; font-src 'self' data:; media-src 'self' data:; connect-src * data:;" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LearningModules</title>
   <link rel="stylesheet" href="css/styles.css" />
@@ -16,6 +16,17 @@
         <span class="login-logo">📚</span>
         <h1 data-i18n="app.title">LernModule</h1>
         <p class="login-subtitle" data-i18n="app.subtitle">Interaktive Lernplattform mit H5P</p>
+        <p class="login-credit">Designed by Martin Metzler, implementation assisted by AI.</p>
+        <div id="networkQr" class="login-qr hidden">
+          <span class="login-qr-title">📡 Im WLAN öffnen</span>
+          <img id="networkQrImg" src="" alt="QR-Code WLAN" class="login-qr-img" />
+          <span id="networkQrUrl" class="login-qr-url"></span>
+        </div>
+        <div class="login-qr">
+          <img src="../../assets/qr-quizzy.svg" alt="QR-Code LearningModules_RN" class="login-qr-img login-qr-img-small" />
+          <span class="login-qr-label">LearningModules_RN auf GitHub</span>
+          <span class="login-qr-url">https://github.com/mmetzler-fes/LearningModules_RN</span>
+        </div>
       </div>
       <form id="loginForm" class="login-form">
         <div class="form-group">
@@ -187,6 +198,7 @@
         </div>
         <div class="topic-actions-bar">
           <button class="btn btn-primary" id="btnCreateModule" data-i18n="modules.new">➕ Neues Modul</button>
+          <button class="btn btn-secondary" id="btnImportModules">📥 Module importieren</button>
           <button class="btn btn-secondary" id="btnExportCurrentTopic" data-i18n="modules.export">📤 Thema exportieren</button>
         </div>
         <div class="modules-list" id="modulesList"></div>
@@ -282,6 +294,19 @@
       </section>
 
     </main>
+  </div>
+
+  <!-- Module import selection dialog -->
+  <div id="importModulesOverlay" class="confirm-overlay hidden">
+    <div class="import-modules-card">
+      <h3>📥 Module importieren</h3>
+      <p class="import-modules-hint">Wähle die Module aus, die importiert werden sollen:</p>
+      <div id="importModulesList" class="import-modules-list"></div>
+      <div class="confirm-actions">
+        <button id="importModulesBtnOk" class="btn btn-primary">✅ Ausgewählte importieren</button>
+        <button id="importModulesBtnCancel" class="btn btn-secondary">Abbrechen</button>
+      </div>
+    </div>
   </div>
 
   <!-- Custom confirm dialog (replaces native confirm()) -->

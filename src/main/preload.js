@@ -16,10 +16,13 @@ contextBridge.exposeInMainWorld('api', {
   getTopicModules: (topicId) => ipcRenderer.invoke('get-topic-modules', topicId),
   saveModule: (topicId, moduleData) => ipcRenderer.invoke('save-module', topicId, moduleData),
   deleteModule: (topicId, moduleId) => ipcRenderer.invoke('delete-module', topicId, moduleId),
+  toggleModuleSelection: (topicId, moduleId, selected) => ipcRenderer.invoke('toggle-module-selection', topicId, moduleId, selected),
 
   // Export/Import
   exportTopic: (topicId) => ipcRenderer.invoke('export-topic', topicId),
   importTopic: () => ipcRenderer.invoke('import-topic'),
+  importModulesToTopic: (topicId) => ipcRenderer.invoke('import-modules-to-topic', topicId),
+  confirmImportModules: (topicId, modules) => ipcRenderer.invoke('confirm-import-modules', topicId, modules),
 
   // Student selections
   getSelectedTopics: () => ipcRenderer.invoke('get-selected-topics'),
@@ -34,6 +37,8 @@ contextBridge.exposeInMainWorld('api', {
 
   // H5P
   getH5pContentPath: () => ipcRenderer.invoke('get-h5p-content-path'),
+  selectImage: () => ipcRenderer.invoke('select-image'),
+  selectAudio: () => ipcRenderer.invoke('select-audio'),
 
   // Menu events
   onMenuImport: (callback) => ipcRenderer.on('menu-import', callback),
@@ -41,4 +46,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // Window focus recovery (fixes Electron focus corruption after native dialogs)
   focusWindow: () => ipcRenderer.send('focus-window'),
+
+  // Web server URL for WLAN access
+  getWebServerUrl: () => ipcRenderer.invoke('get-web-server-url'),
 });

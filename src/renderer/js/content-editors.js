@@ -27,6 +27,12 @@ class ContentEditorManager {
     this.container.innerHTML = '';
     this.container.classList.add('active');
 
+    // Special visual editor for Drag and Drop
+    if (typeDef.editorType === 'dragAndDrop') {
+      this.renderDragAndDropEditor(typeDef, existingData);
+      return;
+    }
+
     const heading = document.createElement('h4');
     heading.textContent = `${typeDef.icon} ${typeDef.name} — Inhalt konfigurieren`;
     this.container.appendChild(heading);
@@ -60,10 +66,142 @@ class ContentEditorManager {
       case 'list':
         this.renderListField(parent, field, value);
         break;
+      case 'image':
+        this.renderImageField(parent, field, value);
+        break;
+      case 'audio':
+        this.renderAudioField(parent, field, value);
+        break;
       case 'group':
         this.renderGroupField(parent, field, value);
         break;
     }
+  }
+
+  renderImageField(parent, field, value) {
+    const group = this.createFormGroup(field.label, field.required);
+    const wrap = document.createElement('div');
+    wrap.className = 'image-field-wrap';
+
+    const hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.name = `content_${field.key}`;
+    hidden.value = value || '';
+
+    const preview = document.createElement('div');
+    preview.className = 'image-field-preview';
+    if (value) {
+      preview.innerHTML = `<img src="${value}" />`;
+    } else {
+      preview.textContent = 'Kein Bild ausgewählt';
+    }
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'image-field-buttons';
+
+    const btnFile = document.createElement('button');
+    btnFile.type = 'button';
+    btnFile.className = 'btn btn-secondary btn-sm';
+    btnFile.textContent = '📁 Bild auswählen';
+    btnFile.addEventListener('click', async () => {
+      const result = await appApi.selectImage();
+      if (result && result.success) {
+        hidden.value = result.dataUrl;
+        preview.innerHTML = `<img src="${result.dataUrl}" />`;
+        btnRemove.style.display = '';
+      }
+    });
+
+    const btnUrl = document.createElement('button');
+    btnUrl.type = 'button';
+    btnUrl.className = 'btn btn-secondary btn-sm';
+    btnUrl.textContent = '🔗 URL eingeben';
+    btnUrl.addEventListener('click', () => {
+      const url = prompt('Bild-URL eingeben:', hidden.value || '');
+      if (url !== null && url.trim()) {
+        hidden.value = url.trim();
+        preview.innerHTML = `<img src="${url.trim()}" />`;
+        btnRemove.style.display = '';
+      }
+    });
+
+    const btnRemove = document.createElement('button');
+    btnRemove.type = 'button';
+    btnRemove.className = 'btn btn-danger btn-sm';
+    btnRemove.textContent = '✕ Entfernen';
+    btnRemove.style.display = value ? '' : 'none';
+    btnRemove.addEventListener('click', () => {
+      hidden.value = '';
+      preview.innerHTML = '';
+      preview.textContent = 'Kein Bild ausgewählt';
+      btnRemove.style.display = 'none';
+    });
+
+    btnRow.appendChild(btnFile);
+    btnRow.appendChild(btnUrl);
+    btnRow.appendChild(btnRemove);
+
+    wrap.appendChild(hidden);
+    wrap.appendChild(preview);
+    wrap.appendChild(btnRow);
+    group.appendChild(wrap);
+    parent.appendChild(group);
+  }
+
+  renderAudioField(parent, field, value) {
+    const group = this.createFormGroup(field.label, field.required);
+    const wrap = document.createElement('div');
+    wrap.className = 'audio-field-wrap';
+
+    const hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.name = `content_${field.key}`;
+    hidden.value = value || '';
+
+    const preview = document.createElement('div');
+    preview.className = 'audio-field-preview';
+    if (value) {
+      preview.innerHTML = `<audio controls src="${value}" style="width:100%;max-width:320px;"></audio>`;
+    } else {
+      preview.textContent = 'Kein Audio ausgewählt';
+    }
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'audio-field-buttons';
+
+    const btnFile = document.createElement('button');
+    btnFile.type = 'button';
+    btnFile.className = 'btn btn-secondary btn-sm';
+    btnFile.textContent = '🎵 Audio auswählen';
+    btnFile.addEventListener('click', async () => {
+      const result = await appApi.selectAudio();
+      if (result && result.success) {
+        hidden.value = result.dataUrl;
+        preview.innerHTML = `<audio controls src="${result.dataUrl}" style="width:100%;max-width:320px;"></audio>`;
+        btnRemove.style.display = '';
+      }
+    });
+
+    const btnRemove = document.createElement('button');
+    btnRemove.type = 'button';
+    btnRemove.className = 'btn btn-danger btn-sm';
+    btnRemove.textContent = '✕ Entfernen';
+    btnRemove.style.display = value ? '' : 'none';
+    btnRemove.addEventListener('click', () => {
+      hidden.value = '';
+      preview.innerHTML = '';
+      preview.textContent = 'Kein Audio ausgewählt';
+      btnRemove.style.display = 'none';
+    });
+
+    btnRow.appendChild(btnFile);
+    btnRow.appendChild(btnRemove);
+
+    wrap.appendChild(hidden);
+    wrap.appendChild(preview);
+    wrap.appendChild(btnRow);
+    group.appendChild(wrap);
+    parent.appendChild(group);
   }
 
   renderTextField(parent, field, value) {
@@ -231,6 +369,11 @@ class ContentEditorManager {
   collectData() {
     if (!this.currentType) return {};
 
+    // Special handling for Drag and Drop visual editor
+    if (this.dndState) {
+      return this.collectDragAndDropData();
+    }
+
     const typeDef = H5P_TYPES[this.currentType];
     const data = {};
 
@@ -246,7 +389,9 @@ class ContentEditorManager {
       case 'text':
       case 'textarea':
       case 'number':
-      case 'select': {
+      case 'select':
+      case 'image':
+      case 'audio': {
         const el = this.container.querySelector(`[name="content_${field.key}"]`);
         if (!el) return field.default || '';
         if (field.type === 'number') return parseFloat(el.value) || 0;
@@ -294,6 +439,13 @@ class ContentEditorManager {
     return result;
   }
 
+  /**
+   * Override for list items that contain 'image' subfields:
+   * The hidden input inside .image-field-wrap needs to be found too.
+   */
+  // (image fields already use hidden inputs with name="content_...", so the
+  //  existing querySelector logic works without changes.)
+
   collectGroupData(field) {
     const data = {};
     for (const subField of field.fields) {
@@ -311,10 +463,533 @@ class ContentEditorManager {
     return data;
   }
 
+  // ==================== DRAG AND DROP VISUAL EDITOR ====================
+
+  renderDragAndDropEditor(typeDef, data) {
+    this.dndState = {
+      backgroundImage: data.backgroundImage || '',
+      dropZones: (data.dropZones || []).map((z, i) => ({
+        id: i,
+        label: z.label || '',
+        x: z.x ?? 10,
+        y: z.y ?? 10,
+        width: z.width ?? 20,
+        height: z.height ?? 15,
+      })),
+      draggables: (data.draggables || []).map((d) => ({
+        text: d.text || '',
+        correctZone: d.correctZone || '',
+      })),
+      nextZoneId: (data.dropZones || []).length,
+      selectedZone: null,
+      drawMode: false,
+    };
+
+    const heading = document.createElement('h4');
+    heading.textContent = `${typeDef.icon} ${typeDef.name} — Inhalt konfigurieren`;
+    this.container.appendChild(heading);
+
+    // Task description
+    const descGroup = this.createFormGroup('Aufgabenbeschreibung');
+    const descArea = document.createElement('textarea');
+    descArea.id = 'dnd-editor-desc';
+    descArea.rows = 3;
+    descArea.value = data.taskDescription || '';
+    descArea.placeholder = 'Beschreibe die Aufgabe für die Schüler...';
+    descGroup.appendChild(descArea);
+    this.container.appendChild(descGroup);
+
+    // Background image section
+    const imgGroup = this.createFormGroup('Hintergrundbild *');
+    const imgControls = document.createElement('div');
+    imgControls.className = 'dnd-img-controls';
+
+    const btnSelectImg = document.createElement('button');
+    btnSelectImg.type = 'button';
+    btnSelectImg.className = 'btn btn-secondary';
+    btnSelectImg.textContent = '📁 Bild auswählen';
+
+    const imgStatus = document.createElement('span');
+    imgStatus.className = 'dnd-img-status';
+    imgStatus.textContent = this.dndState.backgroundImage ? '✅ Bild geladen' : 'Kein Bild ausgewählt';
+
+    const btnRemoveImg = document.createElement('button');
+    btnRemoveImg.type = 'button';
+    btnRemoveImg.className = 'btn btn-danger btn-sm';
+    btnRemoveImg.textContent = '✕ Entfernen';
+    btnRemoveImg.style.display = this.dndState.backgroundImage ? '' : 'none';
+
+    imgControls.appendChild(btnSelectImg);
+    imgControls.appendChild(imgStatus);
+    imgControls.appendChild(btnRemoveImg);
+    imgGroup.appendChild(imgControls);
+    this.container.appendChild(imgGroup);
+
+    // Image canvas area
+    const canvasGroup = document.createElement('div');
+    canvasGroup.className = 'dnd-canvas-wrapper';
+
+    const canvasContainer = document.createElement('div');
+    canvasContainer.className = 'dnd-canvas';
+    canvasContainer.id = 'dnd-canvas';
+
+    const placeholder = document.createElement('div');
+    placeholder.className = 'dnd-canvas-placeholder';
+    placeholder.textContent = 'Bild wird hier angezeigt. Wähle zuerst ein Hintergrundbild aus.';
+
+    canvasContainer.appendChild(placeholder);
+    canvasGroup.appendChild(canvasContainer);
+
+    // Zone toolbar
+    const toolbar = document.createElement('div');
+    toolbar.className = 'dnd-toolbar';
+    const btnAddZone = document.createElement('button');
+    btnAddZone.type = 'button';
+    btnAddZone.className = 'btn btn-primary btn-sm';
+    btnAddZone.id = 'dnd-btn-add-zone';
+    btnAddZone.textContent = '➕ Ablagezone hinzufügen';
+    const btnDrawZone = document.createElement('button');
+    btnDrawZone.type = 'button';
+    btnDrawZone.className = 'btn btn-secondary btn-sm';
+    btnDrawZone.id = 'dnd-btn-draw-zone';
+    btnDrawZone.textContent = '✏️ Zone zeichnen';
+    const drawHint = document.createElement('span');
+    drawHint.className = 'dnd-draw-hint hidden';
+    drawHint.id = 'dnd-draw-hint';
+    drawHint.textContent = 'Klicke und ziehe auf dem Bild um eine Zone zu zeichnen. ESC zum Abbrechen.';
+    toolbar.appendChild(btnAddZone);
+    toolbar.appendChild(btnDrawZone);
+    toolbar.appendChild(drawHint);
+    canvasGroup.appendChild(toolbar);
+    this.container.appendChild(canvasGroup);
+
+    // Drop zones list
+    const zonesGroup = this.createFormGroup('Ablagezonen');
+    const zonesList = document.createElement('div');
+    zonesList.className = 'dnd-zones-list';
+    zonesList.id = 'dnd-zones-list';
+    zonesGroup.appendChild(zonesList);
+    this.container.appendChild(zonesGroup);
+
+    // Draggables section
+    const dragsGroup = this.createFormGroup('Ziehbare Elemente');
+    const dragsList = document.createElement('div');
+    dragsList.className = 'dnd-drags-list';
+    dragsList.id = 'dnd-drags-list';
+    dragsGroup.appendChild(dragsList);
+
+    const btnAddDrag = document.createElement('button');
+    btnAddDrag.type = 'button';
+    btnAddDrag.className = 'btn-add-item';
+    btnAddDrag.textContent = '+ Ziehbares Element hinzufügen';
+    btnAddDrag.addEventListener('click', () => {
+      this.dndState.draggables.push({ text: '', correctZone: '' });
+      this.refreshDndDraggables();
+    });
+    dragsGroup.appendChild(btnAddDrag);
+    this.container.appendChild(dragsGroup);
+
+    // Wire up image selection
+    btnSelectImg.addEventListener('click', async () => {
+      const result = await appApi.selectImage();
+      if (result && result.success) {
+        this.dndState.backgroundImage = result.dataUrl;
+        imgStatus.textContent = '✅ Bild geladen';
+        btnRemoveImg.style.display = '';
+        this.refreshDndCanvas();
+      }
+    });
+    btnRemoveImg.addEventListener('click', () => {
+      this.dndState.backgroundImage = '';
+      imgStatus.textContent = 'Kein Bild ausgewählt';
+      btnRemoveImg.style.display = 'none';
+      this.refreshDndCanvas();
+    });
+
+    // Wire up zone buttons
+    btnAddZone.addEventListener('click', () => {
+      if (!this.dndState.backgroundImage) return;
+      const id = this.dndState.nextZoneId++;
+      this.dndState.dropZones.push({
+        id, label: `Zone ${id + 1}`, x: 35, y: 35, width: 25, height: 20,
+      });
+      this.refreshDndCanvas();
+      this.refreshDndZonesList();
+      this.refreshDndDraggables();
+    });
+
+    // Draw mode
+    btnDrawZone.addEventListener('click', () => {
+      if (!this.dndState.backgroundImage) return;
+      this.dndState.drawMode = !this.dndState.drawMode;
+      btnDrawZone.classList.toggle('active', this.dndState.drawMode);
+      drawHint.classList.toggle('hidden', !this.dndState.drawMode);
+      canvasContainer.classList.toggle('dnd-drawing', this.dndState.drawMode);
+    });
+
+    // ESC key to exit draw mode
+    this._dndKeyHandler = (e) => {
+      if (e.key === 'Escape' && this.dndState.drawMode) {
+        this.dndState.drawMode = false;
+        btnDrawZone.classList.remove('active');
+        drawHint.classList.add('hidden');
+        canvasContainer.classList.remove('dnd-drawing');
+      }
+    };
+    document.addEventListener('keydown', this._dndKeyHandler);
+
+    // Draw mode pointer events on canvas
+    this._setupDndDrawing(canvasContainer);
+
+    // Initial render
+    this.refreshDndCanvas();
+    this.refreshDndZonesList();
+    this.refreshDndDraggables();
+  }
+
+  _setupDndDrawing(canvas) {
+    let drawing = false;
+    let startX = 0, startY = 0;
+    let drawRect = null;
+
+    canvas.addEventListener('pointerdown', (e) => {
+      if (!this.dndState.drawMode) return;
+      if (e.target.classList.contains('dnd-zone-overlay') || e.target.classList.contains('dnd-zone-handle')) return;
+      const rect = canvas.getBoundingClientRect();
+      startX = ((e.clientX - rect.left) / rect.width) * 100;
+      startY = ((e.clientY - rect.top) / rect.height) * 100;
+      drawing = true;
+      drawRect = document.createElement('div');
+      drawRect.className = 'dnd-draw-rect';
+      drawRect.style.left = startX + '%';
+      drawRect.style.top = startY + '%';
+      drawRect.style.width = '0%';
+      drawRect.style.height = '0%';
+      canvas.appendChild(drawRect);
+      canvas.setPointerCapture(e.pointerId);
+    });
+
+    canvas.addEventListener('pointermove', (e) => {
+      if (!drawing || !drawRect) return;
+      const rect = canvas.getBoundingClientRect();
+      const curX = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+      const curY = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
+      const x = Math.min(startX, curX);
+      const y = Math.min(startY, curY);
+      const w = Math.abs(curX - startX);
+      const h = Math.abs(curY - startY);
+      drawRect.style.left = x + '%';
+      drawRect.style.top = y + '%';
+      drawRect.style.width = w + '%';
+      drawRect.style.height = h + '%';
+    });
+
+    canvas.addEventListener('pointerup', (e) => {
+      if (!drawing || !drawRect) return;
+      drawing = false;
+      const rect = canvas.getBoundingClientRect();
+      const curX = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+      const curY = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
+      const x = Math.round(Math.min(startX, curX));
+      const y = Math.round(Math.min(startY, curY));
+      const w = Math.round(Math.abs(curX - startX));
+      const h = Math.round(Math.abs(curY - startY));
+      drawRect.remove();
+      drawRect = null;
+
+      if (w < 3 || h < 3) return; // Too small, ignore
+
+      const id = this.dndState.nextZoneId++;
+      this.dndState.dropZones.push({ id, label: `Zone ${id + 1}`, x, y, width: w, height: h });
+      this.refreshDndCanvas();
+      this.refreshDndZonesList();
+      this.refreshDndDraggables();
+    });
+  }
+
+  refreshDndCanvas() {
+    const canvas = this.container.querySelector('#dnd-canvas');
+    if (!canvas) return;
+
+    // Remove old overlays and placeholder, keep draw-rect if any
+    canvas.querySelectorAll('.dnd-zone-overlay, .dnd-canvas-placeholder, .dnd-canvas-img').forEach((el) => el.remove());
+
+    if (!this.dndState.backgroundImage) {
+      const ph = document.createElement('div');
+      ph.className = 'dnd-canvas-placeholder';
+      ph.textContent = 'Bild wird hier angezeigt. Wähle zuerst ein Hintergrundbild aus.';
+      canvas.appendChild(ph);
+      return;
+    }
+
+    // Set background image
+    let img = canvas.querySelector('.dnd-canvas-img');
+    if (!img) {
+      img = document.createElement('img');
+      img.className = 'dnd-canvas-img';
+      img.draggable = false;
+      canvas.prepend(img);
+    }
+    img.src = this.dndState.backgroundImage;
+
+    // Render drop zones
+    const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
+    this.dndState.dropZones.forEach((zone, i) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'dnd-zone-overlay';
+      overlay.dataset.zoneId = zone.id;
+      const color = colors[i % colors.length];
+      overlay.style.left = zone.x + '%';
+      overlay.style.top = zone.y + '%';
+      overlay.style.width = zone.width + '%';
+      overlay.style.height = zone.height + '%';
+      overlay.style.borderColor = color;
+      overlay.style.background = color + '25';
+
+      if (this.dndState.selectedZone === zone.id) {
+        overlay.classList.add('selected');
+      }
+
+      const label = document.createElement('span');
+      label.className = 'dnd-zone-label';
+      label.style.background = color;
+      label.textContent = zone.label || `Zone ${i + 1}`;
+      overlay.appendChild(label);
+
+      // Resize handle
+      const handle = document.createElement('div');
+      handle.className = 'dnd-zone-handle';
+      overlay.appendChild(handle);
+
+      // Click to select
+      overlay.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.dndState.selectedZone = zone.id;
+        this.refreshDndCanvas();
+      });
+
+      // Make zone draggable (move)
+      this._makeDndZoneDraggable(overlay, zone, canvas);
+      // Make zone resizable
+      this._makeDndZoneResizable(handle, zone, canvas);
+
+      canvas.appendChild(overlay);
+    });
+
+    // Click on canvas background deselects
+    canvas.addEventListener('click', (e) => {
+      if (e.target === canvas || e.target === img) {
+        this.dndState.selectedZone = null;
+        this.refreshDndCanvas();
+      }
+    }, { once: true });
+  }
+
+  _makeDndZoneDraggable(overlay, zone, canvas) {
+    let dragging = false;
+    let offsetX = 0, offsetY = 0;
+
+    overlay.addEventListener('pointerdown', (e) => {
+      if (this.dndState.drawMode) return;
+      if (e.target.classList.contains('dnd-zone-handle')) return;
+      dragging = true;
+      const rect = canvas.getBoundingClientRect();
+      offsetX = ((e.clientX - rect.left) / rect.width) * 100 - zone.x;
+      offsetY = ((e.clientY - rect.top) / rect.height) * 100 - zone.y;
+      overlay.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+
+    overlay.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const rect = canvas.getBoundingClientRect();
+      let newX = ((e.clientX - rect.left) / rect.width) * 100 - offsetX;
+      let newY = ((e.clientY - rect.top) / rect.height) * 100 - offsetY;
+      newX = Math.max(0, Math.min(100 - zone.width, newX));
+      newY = Math.max(0, Math.min(100 - zone.height, newY));
+      zone.x = Math.round(newX);
+      zone.y = Math.round(newY);
+      overlay.style.left = zone.x + '%';
+      overlay.style.top = zone.y + '%';
+    });
+
+    overlay.addEventListener('pointerup', () => {
+      if (dragging) {
+        dragging = false;
+        this.refreshDndZonesList();
+      }
+    });
+  }
+
+  _makeDndZoneResizable(handle, zone, canvas) {
+    let resizing = false;
+
+    handle.addEventListener('pointerdown', (e) => {
+      if (this.dndState.drawMode) return;
+      resizing = true;
+      handle.setPointerCapture(e.pointerId);
+      e.stopPropagation();
+      e.preventDefault();
+    });
+
+    handle.addEventListener('pointermove', (e) => {
+      if (!resizing) return;
+      const rect = canvas.getBoundingClientRect();
+      const curX = ((e.clientX - rect.left) / rect.width) * 100;
+      const curY = ((e.clientY - rect.top) / rect.height) * 100;
+      let newW = curX - zone.x;
+      let newH = curY - zone.y;
+      newW = Math.max(5, Math.min(100 - zone.x, newW));
+      newH = Math.max(5, Math.min(100 - zone.y, newH));
+      zone.width = Math.round(newW);
+      zone.height = Math.round(newH);
+      const overlay = handle.parentElement;
+      overlay.style.width = zone.width + '%';
+      overlay.style.height = zone.height + '%';
+    });
+
+    handle.addEventListener('pointerup', () => {
+      if (resizing) {
+        resizing = false;
+        this.refreshDndZonesList();
+      }
+    });
+  }
+
+  refreshDndZonesList() {
+    const list = this.container.querySelector('#dnd-zones-list');
+    if (!list) return;
+    list.innerHTML = '';
+
+    if (this.dndState.dropZones.length === 0) {
+      list.innerHTML = '<p style="color:var(--text-secondary); font-size:0.9rem;">Noch keine Ablagezonen definiert.</p>';
+      return;
+    }
+
+    const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
+    this.dndState.dropZones.forEach((zone, i) => {
+      const item = document.createElement('div');
+      item.className = 'dnd-zone-item';
+      const color = colors[i % colors.length];
+
+      const colorDot = document.createElement('span');
+      colorDot.className = 'dnd-zone-dot';
+      colorDot.style.background = color;
+
+      const labelInput = document.createElement('input');
+      labelInput.type = 'text';
+      labelInput.value = zone.label;
+      labelInput.placeholder = 'Zonenbezeichnung...';
+      labelInput.className = 'dnd-zone-label-input';
+      labelInput.addEventListener('input', () => {
+        zone.label = labelInput.value;
+        this.refreshDndCanvas();
+        this.refreshDndDraggables();
+      });
+
+      const posLabel = document.createElement('span');
+      posLabel.className = 'dnd-zone-pos';
+      posLabel.textContent = `${zone.x}%, ${zone.y}% — ${zone.width}×${zone.height}%`;
+
+      const btnRemove = document.createElement('button');
+      btnRemove.type = 'button';
+      btnRemove.className = 'btn btn-danger btn-sm';
+      btnRemove.textContent = '✕';
+      btnRemove.addEventListener('click', () => {
+        this.dndState.dropZones = this.dndState.dropZones.filter((z) => z.id !== zone.id);
+        this.refreshDndCanvas();
+        this.refreshDndZonesList();
+        this.refreshDndDraggables();
+      });
+
+      item.appendChild(colorDot);
+      item.appendChild(labelInput);
+      item.appendChild(posLabel);
+      item.appendChild(btnRemove);
+      list.appendChild(item);
+    });
+  }
+
+  refreshDndDraggables() {
+    const list = this.container.querySelector('#dnd-drags-list');
+    if (!list) return;
+    list.innerHTML = '';
+
+    this.dndState.draggables.forEach((drag, i) => {
+      const item = document.createElement('div');
+      item.className = 'dnd-drag-item';
+
+      const numLabel = document.createElement('span');
+      numLabel.className = 'dnd-drag-num';
+      numLabel.textContent = `#${i + 1}`;
+
+      const textInput = document.createElement('input');
+      textInput.type = 'text';
+      textInput.value = drag.text;
+      textInput.placeholder = 'Element-Text...';
+      textInput.className = 'dnd-drag-text-input';
+      textInput.addEventListener('input', () => { drag.text = textInput.value; });
+
+      const zoneSelect = document.createElement('select');
+      zoneSelect.className = 'dnd-drag-zone-select';
+      const emptyOpt = document.createElement('option');
+      emptyOpt.value = '';
+      emptyOpt.textContent = '— Korrekte Zone —';
+      zoneSelect.appendChild(emptyOpt);
+      this.dndState.dropZones.forEach((zone) => {
+        const opt = document.createElement('option');
+        opt.value = zone.label;
+        opt.textContent = zone.label;
+        if (drag.correctZone === zone.label) opt.selected = true;
+        zoneSelect.appendChild(opt);
+      });
+      zoneSelect.addEventListener('change', () => { drag.correctZone = zoneSelect.value; });
+
+      const btnRemove = document.createElement('button');
+      btnRemove.type = 'button';
+      btnRemove.className = 'btn btn-danger btn-sm';
+      btnRemove.textContent = '✕';
+      btnRemove.addEventListener('click', () => {
+        this.dndState.draggables.splice(i, 1);
+        this.refreshDndDraggables();
+      });
+
+      item.appendChild(numLabel);
+      item.appendChild(textInput);
+      item.appendChild(zoneSelect);
+      item.appendChild(btnRemove);
+      list.appendChild(item);
+    });
+  }
+
+  collectDragAndDropData() {
+    const desc = this.container.querySelector('#dnd-editor-desc');
+    return {
+      taskDescription: desc ? desc.value : '',
+      backgroundImage: this.dndState.backgroundImage,
+      dropZones: this.dndState.dropZones.map((z) => ({
+        label: z.label,
+        x: z.x,
+        y: z.y,
+        width: z.width,
+        height: z.height,
+      })),
+      draggables: this.dndState.draggables.filter((d) => d.text.trim()).map((d) => ({
+        text: d.text,
+        correctZone: d.correctZone,
+      })),
+    };
+  }
+
   /**
    * Clear the editor.
    */
   clear() {
+    if (this._dndKeyHandler) {
+      document.removeEventListener('keydown', this._dndKeyHandler);
+      this._dndKeyHandler = null;
+    }
+    this.dndState = null;
     this.container.innerHTML = '';
     this.container.classList.remove('active');
     this.currentType = null;

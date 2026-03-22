@@ -161,6 +161,51 @@ body {
   font-size: 0.9rem;
 }
 
+.login-credit {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  margin-top: 8px;
+  opacity: 0.7;
+}
+
+.login-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 12px;
+}
+.login-qr-img {
+  width: 120px;
+  height: 120px;
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 6px;
+}
+.login-qr-label {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  opacity: 0.7;
+}
+.login-qr-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.login-qr-img-small {
+  width: 80px;
+  height: 80px;
+}
+.login-qr-url {
+  font-size: 0.65rem;
+  color: var(--accent);
+  margin-top: 2px;
+  word-break: break-all;
+  text-align: center;
+  opacity: 0.8;
+}
+
 .login-form {
   margin-bottom: 16px;
 }
@@ -882,6 +927,298 @@ body {
   background: #dbeafe;
 }
 
+/* ===== Drag and Drop Visual Editor ===== */
+.dnd-img-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dnd-img-status {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.dnd-canvas-wrapper {
+  margin-bottom: 16px;
+}
+
+.dnd-canvas {
+  position: relative;
+  width: 100%;
+  min-height: 200px;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  user-select: none;
+}
+
+.dnd-canvas.dnd-drawing {
+  cursor: crosshair;
+}
+
+.dnd-canvas-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+}
+
+.dnd-canvas-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  padding: 24px;
+  text-align: center;
+}
+
+.dnd-zone-overlay {
+  position: absolute;
+  border: 2px solid;
+  border-radius: 4px;
+  cursor: move;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  touch-action: none;
+}
+
+.dnd-zone-overlay.selected {
+  border-width: 3px;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
+}
+
+.dnd-zone-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 2px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.dnd-zone-handle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border: 2px solid #666;
+  border-radius: 2px;
+  cursor: se-resize;
+  touch-action: none;
+}
+
+.dnd-draw-rect {
+  position: absolute;
+  border: 2px dashed var(--accent);
+  background: rgba(59, 130, 246, 0.15);
+  pointer-events: none;
+}
+
+.dnd-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.dnd-draw-hint {
+  font-size: 0.82rem;
+  color: var(--accent);
+  font-style: italic;
+}
+
+.dnd-zone-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+}
+
+.dnd-zone-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dnd-zone-label-input {
+  flex: 1;
+  min-width: 100px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.dnd-zone-pos {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.dnd-drag-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+}
+
+.dnd-drag-num {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  min-width: 24px;
+}
+
+.dnd-drag-text-input {
+  flex: 1;
+  min-width: 120px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.dnd-drag-zone-select {
+  min-width: 140px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+/* ===== Drag and Drop Player ===== */
+.dnd-player {
+  padding: 20px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-md);
+}
+
+.dnd-player-desc {
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.dnd-player-draggables {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+  min-height: 40px;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.dnd-player-drag {
+  padding: 6px 14px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: grab;
+  user-select: none;
+  transition: opacity 0.2s, transform 0.15s;
+}
+
+.dnd-player-drag:active,
+.dnd-player-drag.dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
+.dnd-player-drag.placed {
+  opacity: 0.85;
+  font-size: 0.8rem;
+  padding: 4px 10px;
+}
+
+.dnd-player-canvas-wrap {
+  margin-bottom: 12px;
+}
+
+.dnd-player-canvas {
+  position: relative;
+  width: 100%;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-secondary);
+}
+
+.dnd-player-no-img {
+  padding: 16px;
+}
+
+.dnd-player-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+}
+
+.dnd-player-zone {
+  position: absolute;
+  border: 2px solid;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+  transition: background 0.2s;
+}
+
+.dnd-player-zone.dnd-zone-hover {
+  filter: brightness(1.2);
+  border-style: solid;
+}
+
+.dnd-player-zone-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 2px;
+  white-space: nowrap;
+  align-self: flex-start;
+  pointer-events: none;
+}
+
+.dnd-player-zone-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px;
+  flex: 1;
+}
+
 /* ===== Buttons ===== */
 .btn {
   padding: 10px 20px;
@@ -1334,12 +1671,473 @@ body {
   to { opacity: 1; transform: translateX(0); }
 }
 
-/* ===== Checkbox for export selection ===== */
+/* ===== Module selection checkbox ===== */
 .module-select-checkbox {
   width: 18px;
   height: 18px;
   cursor: pointer;
   accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.module-card-disabled {
+  opacity: 0.45;
+  filter: grayscale(0.4);
+}
+.module-card-disabled .module-select-checkbox {
+  opacity: 1;
+  filter: none;
+}
+
+/* ===== Import Modules Modal ===== */
+.import-modules-card {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  padding: 32px;
+  max-width: 520px;
+  width: 90%;
+  box-shadow: var(--shadow-lg);
+  animation: fadeIn 0.15s ease;
+}
+
+.import-modules-card h3 {
+  margin-bottom: 8px;
+  color: var(--text-primary);
+}
+
+.import-modules-hint {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+.import-modules-list {
+  max-height: 340px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.import-module-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.import-module-item:hover {
+  background: var(--bg-hover);
+}
+
+.import-module-item label {
+  cursor: pointer;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.import-module-title {
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--text-primary);
+}
+
+.import-module-type {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+/* ===== Image Field ===== */
+.image-field-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.image-field-preview {
+  min-height: 48px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.image-field-preview img {
+  max-width: 100%;
+  max-height: 180px;
+  border-radius: var(--radius-sm);
+}
+
+.image-field-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ===== Audio Field ===== */
+.audio-field-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.audio-field-preview {
+  min-height: 40px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+}
+
+.audio-field-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ===== Dialog Cards Player ===== */
+.dc-player {
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.dc-card {
+  background: var(--bg-primary);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  text-align: center;
+}
+
+.dc-image {
+  margin-bottom: 12px;
+}
+
+.dc-image img {
+  max-width: 100%;
+  max-height: 240px;
+  border-radius: var(--radius-sm);
+}
+
+.dc-audio {
+  margin-bottom: 12px;
+}
+
+.dc-display {
+  padding: 40px;
+  min-height: 150px;
+  background: var(--accent-light);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dc-hint {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.dc-tip {
+  margin-top: 8px;
+}
+
+.dc-tip-icon {
+  font-size: 0.85rem;
+  color: var(--accent);
+  cursor: help;
+  padding: 4px 8px;
+  background: var(--accent-light, rgba(99, 102, 241, 0.1));
+  border-radius: var(--radius-sm);
+}
+
+.dc-nav {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.dc-counter {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 36px;
+}
+
+/* ===== Flashcard Image ===== */
+.flashcard-image {
+  margin-bottom: 12px;
+}
+
+/* ===== Flashcard Player ===== */
+.fc-player {
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.fc-card {
+  background: var(--bg-primary);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  text-align: center;
+}
+
+.fc-image {
+  margin-bottom: 16px;
+}
+
+.fc-image img {
+  max-width: 100%;
+  max-height: 240px;
+  border-radius: var(--radius-sm);
+}
+
+.fc-question {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 20px;
+  min-height: 1.5em;
+}
+
+.fc-answer-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.fc-input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.95rem;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.fc-input:focus {
+  border-color: var(--accent);
+}
+
+.fc-input:disabled {
+  opacity: 0.6;
+}
+
+.fc-feedback {
+  min-height: 1.5em;
+  font-size: 0.92rem;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+
+.fc-feedback-correct {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.fc-feedback-wrong {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.fc-nav {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.fc-counter {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.fc-score {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* ===== True/False Player ===== */
+.tf-player {
+  padding: 20px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-md);
+}
+.tf-progress {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+.tf-card {
+  margin-bottom: 16px;
+}
+.tf-question {
+  font-weight: 600;
+  font-size: 1.05rem;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+.tf-buttons {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.tf-buttons .tf-btn {
+  min-width: 100px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.tf-buttons .tf-btn.tf-selected {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.tf-buttons .tf-btn:disabled:not(.tf-selected) {
+  opacity: 0.5;
+}
+.tf-feedback {
+  min-height: 1.5em;
+  padding: 8px 0;
+  font-weight: 600;
+}
+.tf-feedback-correct { color: #22c55e; }
+.tf-feedback-wrong { color: #ef4444; }
+.tf-correct { color: #22c55e; }
+.tf-wrong { color: #ef4444; }
+.tf-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.tf-score {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* ===== Drag the Words ===== */
+.dtw-container {
+  padding: 20px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-md);
+}
+
+.dtw-description {
+  margin-bottom: 16px;
+}
+
+.dtw-text-area {
+  line-height: 2.4;
+  margin-bottom: 16px;
+  font-size: 1rem;
+}
+
+.dtw-static-text {
+  white-space: pre-wrap;
+}
+
+.dtw-drop-zone {
+  display: inline-block;
+  min-width: 80px;
+  min-height: 28px;
+  padding: 4px 12px;
+  margin: 2px 4px;
+  border: 2px dashed var(--text-secondary);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  vertical-align: middle;
+  text-align: center;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.dtw-drop-zone.dtw-drop-hover {
+  border-color: var(--accent);
+  background: var(--accent-light, rgba(99, 102, 241, 0.1));
+}
+
+.dtw-drop-zone.dtw-drop-filled {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-light, rgba(99, 102, 241, 0.1));
+  cursor: grab;
+  font-weight: 600;
+}
+
+.dtw-drop-zone.dtw-correct {
+  border-color: var(--success, #22c55e);
+  background: #dcfce7;
+  color: #166534;
+}
+
+.dtw-drop-zone.dtw-wrong {
+  border-color: var(--danger, #ef4444);
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.dtw-drop-zone.dtw-missing {
+  border-color: #eab308;
+  background: #fef9c3;
+}
+
+.dtw-word-bank {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  min-height: 44px;
+}
+
+.dtw-chip {
+  display: inline-block;
+  padding: 6px 14px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: var(--radius-sm);
+  cursor: grab;
+  font-weight: 600;
+  font-size: 0.9rem;
+  user-select: none;
+  transition: opacity 0.15s, transform 0.1s;
+}
+
+.dtw-chip:hover {
+  transform: translateY(-1px);
+}
+
+.dtw-chip:active {
+  cursor: grabbing;
+}
+
+.dtw-chip.dtw-chip-used {
+  opacity: 0.25;
+  pointer-events: none;
 }
 
 /* ===== Responsive ===== */

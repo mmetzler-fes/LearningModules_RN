@@ -108,6 +108,8 @@ const H5P_TYPES = {
       { key: 'cards', type: 'list', label: 'Karten', itemFields: [
         { key: 'front', type: 'text', label: 'Vorderseite', required: true },
         { key: 'back', type: 'text', label: 'Rückseite', required: true },
+        { key: 'imageUrl', type: 'image', label: 'Bild (optional)' },
+        { key: 'audioUrl', type: 'audio', label: 'Audio (optional)' },
         { key: 'tip', type: 'text', label: 'Hinweis (optional)' },
       ]},
       { key: 'mode', type: 'select', label: 'Modus', options: [
@@ -136,10 +138,16 @@ const H5P_TYPES = {
     icon: '🎯',
     description: 'Elemente per Drag & Drop auf Zielzonen ziehen.',
     category: 'Interaktiv',
+    editorType: 'dragAndDrop',
     fields: [
       { key: 'taskDescription', type: 'textarea', label: 'Aufgabenbeschreibung' },
+      { key: 'backgroundImage', type: 'text', label: 'Hintergrundbild' },
       { key: 'dropZones', type: 'list', label: 'Ablagezonen', itemFields: [
         { key: 'label', type: 'text', label: 'Zonenbezeichnung', required: true },
+        { key: 'x', type: 'number', label: 'X (%)' },
+        { key: 'y', type: 'number', label: 'Y (%)' },
+        { key: 'width', type: 'number', label: 'Breite (%)' },
+        { key: 'height', type: 'number', label: 'Höhe (%)' },
       ]},
       { key: 'draggables', type: 'list', label: 'Ziehbare Elemente', itemFields: [
         { key: 'text', type: 'text', label: 'Element-Text', required: true },
@@ -183,8 +191,8 @@ const H5P_TYPES = {
     fields: [
       { key: 'cards', type: 'list', label: 'Karten', itemFields: [
         { key: 'question', type: 'text', label: 'Frage / Vorderseite', required: true },
-        { key: 'answer', type: 'text', label: 'Antwort', required: true },
-        { key: 'imageUrl', type: 'text', label: 'Bild-URL (optional)' },
+        { key: 'answer', type: 'text', label: 'Antwort (Alternativen mit / trennen)', required: true, placeholder: 'z.B. Berlin / berlin / Hauptstadt' },
+        { key: 'imageUrl', type: 'image', label: 'Bild (optional)' },
       ]},
     ],
   },
@@ -251,13 +259,15 @@ const H5P_TYPES = {
     description: 'Wahr/Falsch-Fragen.',
     category: 'Quiz',
     fields: [
-      { key: 'question', type: 'textarea', label: 'Frage', required: true },
-      { key: 'correctAnswer', type: 'select', label: 'Korrekte Antwort', options: [
-        { value: 'true', label: 'Wahr' },
-        { value: 'false', label: 'Falsch' },
+      { key: 'questions', type: 'list', label: 'Fragen', itemFields: [
+        { key: 'question', type: 'textarea', label: 'Frage', required: true },
+        { key: 'correctAnswer', type: 'select', label: 'Korrekte Antwort', options: [
+          { value: 'true', label: 'Wahr' },
+          { value: 'false', label: 'Falsch' },
+        ]},
+        { key: 'feedbackCorrect', type: 'text', label: 'Feedback bei richtiger Antwort', default: 'Richtig!' },
+        { key: 'feedbackWrong', type: 'text', label: 'Feedback bei falscher Antwort', default: 'Leider falsch.' },
       ]},
-      { key: 'feedbackCorrect', type: 'text', label: 'Feedback bei richtiger Antwort', default: 'Richtig!' },
-      { key: 'feedbackWrong', type: 'text', label: 'Feedback bei falscher Antwort', default: 'Leider falsch.' },
     ],
   },
   video: {

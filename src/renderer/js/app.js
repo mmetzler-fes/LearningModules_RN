@@ -1,7 +1,53 @@
 /**
  * LearningModules v2.0 - Main Application Logic
  * Features: Teacher/Student Login, Topic Management, Quiz Mode with Results
+ * Supports: Electron (full) + Browser via WLAN (student read-only)
  */
+
+// --- Browser vs Electron detection ---
+const isElectron = !!(window.api && window.api.getTopics);
+
+// --- REST API fallback for browser mode ---
+const browserApi = {
+  // Student-accessible endpoints
+  getSelectedTopics: () => fetch('/api/selected-topics').then(r => r.json()),
+  getTopicModules: (topicId) => fetch(`/api/topics/${encodeURIComponent(topicId)}/modules`).then(r => r.json()),
+  getStudentSelections: (username) => fetch(`/api/student-selections/${encodeURIComponent(username)}`).then(r => r.json()),
+  saveStudentSelections: (username, topicIds) => fetch(`/api/student-selections/${encodeURIComponent(username)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topicIds })
+  }).then(r => r.json()),
+  saveQuizResult: (resultData) => fetch('/api/quiz-result', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(resultData)
+  }).then(r => r.json()),
+
+  // Not available in browser — return safe defaults
+  verifyAdmin: () => Promise.resolve(false),
+  getTopics: () => fetch('/api/selected-topics').then(r => r.json()),
+  getAdminCredentials: () => Promise.resolve({ username: '', password: '' }),
+  updateAdminPassword: () => Promise.resolve({ success: false }),
+  saveTopic: () => Promise.resolve({ success: false }),
+  deleteTopic: () => Promise.resolve({ success: false }),
+  toggleTopicSelection: () => Promise.resolve({ success: false }),
+  saveModule: () => Promise.resolve({ success: false }),
+  deleteModule: () => Promise.resolve({ success: false }),
+  toggleModuleSelection: () => Promise.resolve({ success: false }),
+  exportTopic: () => Promise.resolve({ success: false }),
+  importTopic: () => Promise.resolve({ success: false }),
+  importModulesToTopic: () => Promise.resolve(null),
+  confirmImportModules: () => Promise.resolve({ success: false }),
+  getQuizResults: () => Promise.resolve([]),
+  deleteQuizResult: () => Promise.resolve({ success: false }),
+  deleteAllQuizResults: () => Promise.resolve({ success: false }),
+  getH5pContentPath: () => Promise.resolve(''),
+  selectImage: () => Promise.resolve({ success: false }),
+  selectAudio: () => Promise.resolve({ success: false }),
+  onMenuImport: () => {},
+  onMenuExport: () => {},
+  focusWindow: () => {},
+  getWebServerUrl: () => Promise.resolve(null),
+};
+
+const appApi = isElectron ? window.api : browserApi;
 
 // --- State ---
 let currentUser = null; // { name, role: 'teacher'|'student' }
@@ -65,7 +111,14 @@ const searchModules = document.getElementById('searchModules');
 const filterType = document.getElementById('filterType');
 const btnCreateModule = document.getElementById('btnCreateModule');
 const btnExportCurrentTopic = document.getElementById('btnExportCurrentTopic');
+const btnImportModules = document.getElementById('btnImportModules');
 const modulesList = document.getElementById('modulesList');
+
+// Import Modules Modal
+const importModulesOverlay = document.getElementById('importModulesOverlay');
+const importModulesList = document.getElementById('importModulesList');
+const importModulesBtnOk = document.getElementById('importModulesBtnOk');
+const importModulesBtnCancel = document.getElementById('importModulesBtnCancel');
 
 // Create/Edit Module
 const moduleForm = document.getElementById('moduleForm');
@@ -152,7 +205,7 @@ adminLoginForm.addEventListener('submit', async (e) => {
   const user = adminUsername.value.trim();
   const pass = adminPassword.value;
   if (!user || !pass) return;
-  const valid = await window.api.verifyAdmin(user, pass);
+  const valid = await appApi.verifyAdmin(user, pass);
   if (valid) {
     currentUser = { name: user, role: 'teacher' };
     adminLoginError.classList.add('hidden');
@@ -278,7 +331,7 @@ function showToast(message, type = 'info') {
 // ==================== DATA LOADING ====================
 
 async function loadTopics() {
-  topics = await window.api.getTopics();
+  topics = await appApi.getTopics();
 }
 
 // ==================== TEACHER: DASHBOARD ====================
@@ -289,7 +342,7 @@ async function refreshTeacherDashboard() {
   const totalModules = topics.reduce((sum, t) => sum + (t.modules || []).length, 0);
   statModules.textContent = totalModules;
   statActive.textContent = topics.filter((t) => t.selected).length;
-  const results = await window.api.getQuizResults();
+  const results = await appApi.getQuizResults();
   statResults.textContent = results.length;
   renderTypeGrid();
 }
@@ -354,7 +407,7 @@ async function refreshTopicsList() {
 
     // Toggle activation
     card.querySelector('.topic-toggle').addEventListener('change', async (e) => {
-      await window.api.toggleTopicSelection(topic.id, e.target.checked);
+      await appApi.toggleTopicSelection(topic.id, e.target.checked);
       showToast(e.target.checked ? t('topics.activated') : t('topics.deactivated'), 'info');
       refreshTopicsList();
     });
@@ -371,14 +424,14 @@ async function refreshTopicsList() {
 
     // Export topic
     card.querySelector('.btn-export-topic').addEventListener('click', async () => {
-      const result = await window.api.exportTopic(topic.id);
+      const result = await appApi.exportTopic(topic.id);
       if (result.success) showToast(t('topics.exported'), 'success');
     });
 
     // Delete topic
     card.querySelector('.btn-delete-topic').addEventListener('click', async () => {
       if (!(await appConfirm(t('topics.delete.confirm', { title: topic.title })))) return;
-      await window.api.deleteTopic(topic.id);
+      await appApi.deleteTopic(topic.id);
       showToast(t('topics.deleted'), 'info');
       refreshTopicsList();
     });
@@ -396,7 +449,7 @@ btnNewTopic.addEventListener('click', () => {
 });
 
 btnImportTopic.addEventListener('click', async () => {
-  const result = await window.api.importTopic();
+  const result = await appApi.importTopic();
   if (result.success) {
     showToast(t('topics.import.success', { title: result.topicTitle, count: result.importedCount }), 'success');
     refreshTopicsList();
@@ -423,7 +476,7 @@ topicForm.addEventListener('submit', async (e) => {
     createdAt: editingTopicId ? (topics.find((t) => t.id === editingTopicId) || {}).createdAt || new Date().toISOString() : new Date().toISOString(),
   };
 
-  await window.api.saveTopic(topicData);
+  await appApi.saveTopic(topicData);
   showToast(editingTopicId ? t('topics.updated') : t('topics.created'), 'success');
   topicFormContainer.classList.add('hidden');
   editingTopicId = null;
@@ -460,7 +513,7 @@ async function refreshModulesList() {
     return;
   }
 
-  currentTopicModules = await window.api.getTopicModules(currentTopicId);
+  currentTopicModules = await appApi.getTopicModules(currentTopicId);
 
   const search = searchModules.value.toLowerCase().trim();
   const typeFilter = filterType.value;
@@ -491,9 +544,11 @@ async function refreshModulesList() {
 
   for (const mod of filtered) {
     const typeDef = H5P_TYPES[mod.type] || {};
+    const isSelected = mod.moduleSelected !== false;
     const card = document.createElement('div');
-    card.className = 'module-card';
+    card.className = `module-card ${isSelected ? '' : 'module-card-disabled'}`;
     card.innerHTML = `
+      <input type="checkbox" class="module-select-checkbox" title="Modul für Schüler aktivieren" ${isSelected ? 'checked' : ''} />
       <div class="module-card-icon">${typeDef.icon || '📦'}</div>
       <div class="module-card-info">
         <div class="module-card-title">${escapeHtml(mod.title)}</div>
@@ -509,6 +564,11 @@ async function refreshModulesList() {
       </div>
     `;
 
+    card.querySelector('.module-select-checkbox').addEventListener('change', async (e) => {
+      await appApi.toggleModuleSelection(currentTopicId, mod.id, e.target.checked);
+      mod.moduleSelected = e.target.checked;
+      card.classList.toggle('module-card-disabled', !e.target.checked);
+    });
     card.querySelector('.btn-preview').addEventListener('click', () => openPlayer(mod));
     card.querySelector('.btn-edit').addEventListener('click', () => openModuleEditor(mod));
     card.querySelector('.btn-delete').addEventListener('click', () => deleteModule(mod));
@@ -526,8 +586,67 @@ btnCreateModule.addEventListener('click', () => {
 
 btnExportCurrentTopic.addEventListener('click', async () => {
   if (!currentTopicId) return;
-  const result = await window.api.exportTopic(currentTopicId);
+  const result = await appApi.exportTopic(currentTopicId);
   if (result.success) showToast(t('topics.exported'), 'success');
+});
+
+// --- Import Modules ---
+let pendingImportModules = []; // full module objects from file
+
+btnImportModules.addEventListener('click', async () => {
+  if (!currentTopicId) return;
+  const result = await appApi.importModulesToTopic(currentTopicId);
+  if (!result || !result.success) return;
+
+  pendingImportModules = result._fullModules || [];
+  const modules = result.modules || [];
+
+  importModulesList.innerHTML = '';
+  for (const mod of modules) {
+    const typeInfo = H5P_TYPES[mod.type] || {};
+    const div = document.createElement('div');
+    div.className = 'import-module-item';
+    div.innerHTML = `
+      <input type="checkbox" class="module-select-checkbox" data-mod-id="${mod.id}" checked />
+      <label>
+        <span class="import-module-title">${typeInfo.icon || '📦'} ${mod.title || 'Ohne Titel'}</span>
+        <span class="import-module-type">${typeInfo.name || mod.type || 'Unbekannt'}</span>
+      </label>
+    `;
+    const cb = div.querySelector('input');
+    div.addEventListener('click', (e) => {
+      if (e.target !== cb) cb.checked = !cb.checked;
+    });
+    importModulesList.appendChild(div);
+  }
+  importModulesOverlay.classList.remove('hidden');
+});
+
+importModulesBtnCancel.addEventListener('click', () => {
+  importModulesOverlay.classList.add('hidden');
+  pendingImportModules = [];
+});
+
+importModulesBtnOk.addEventListener('click', async () => {
+  const checked = importModulesList.querySelectorAll('input[type=checkbox]:checked');
+  const selectedIds = new Set([...checked].map((cb) => cb.dataset.modId));
+  const selectedModules = pendingImportModules.filter((m) => selectedIds.has(m.id));
+
+  if (selectedModules.length === 0) {
+    showToast('Keine Module ausgewählt.', 'error');
+    return;
+  }
+
+  const result = await appApi.confirmImportModules(currentTopicId, selectedModules);
+  importModulesOverlay.classList.add('hidden');
+  pendingImportModules = [];
+
+  if (result && result.success) {
+    showToast(`${selectedModules.length} Modul(e) importiert.`, 'success');
+    await loadTopicModules(currentTopicId);
+  } else {
+    showToast('Import fehlgeschlagen.', 'error');
+  }
 });
 
 // ==================== MODULE FORM ====================
@@ -582,22 +701,27 @@ moduleForm.addEventListener('submit', async (e) => {
 
   const content = contentEditor.collectData();
 
+  const existingModule = editingModuleId
+    ? currentTopicModules.find((m) => m.id === editingModuleId)
+    : null;
+
   const moduleData = {
     id: editingModuleId || generateId(),
     title,
     type,
     description,
     content,
-    createdAt: editingModuleId
-      ? (currentTopicModules.find((m) => m.id === editingModuleId) || {}).createdAt || new Date().toISOString()
+    moduleSelected: existingModule ? existingModule.moduleSelected : true,
+    createdAt: existingModule
+      ? existingModule.createdAt || new Date().toISOString()
       : new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
 
-  const result = await window.api.saveModule(currentTopicId, moduleData);
+  const result = await appApi.saveModule(currentTopicId, moduleData);
   if (result.success) {
     showToast(editingModuleId ? t('module.updated') : t('module.saved'), 'success');
-    currentTopicModules = await window.api.getTopicModules(currentTopicId);
+    currentTopicModules = await appApi.getTopicModules(currentTopicId);
     resetModuleForm();
     navigateToView('teacher-modules');
   } else {
@@ -633,10 +757,10 @@ function openModuleEditor(mod) {
 
 async function deleteModule(mod) {
   if (!(await appConfirm(t('modules.delete.confirm', { title: mod.title })))) return;
-  const result = await window.api.deleteModule(currentTopicId, mod.id);
+  const result = await appApi.deleteModule(currentTopicId, mod.id);
   if (result.success) {
     showToast(t('modules.deleted'), 'info');
-    currentTopicModules = await window.api.getTopicModules(currentTopicId);
+    currentTopicModules = await appApi.getTopicModules(currentTopicId);
     refreshModulesList();
   }
 }
@@ -663,7 +787,7 @@ btnBackFromPlayer.addEventListener('click', () => {
 // ==================== TEACHER: RESULTS ====================
 
 async function refreshResults() {
-  const results = await window.api.getQuizResults();
+  const results = await appApi.getQuizResults();
   const search = searchResults.value.toLowerCase().trim();
 
   let filtered = results;
@@ -735,7 +859,7 @@ async function refreshResults() {
     `;
 
     card.querySelector('.btn-delete-result').addEventListener('click', async () => {
-      await window.api.deleteQuizResult(r.id);
+      await appApi.deleteQuizResult(r.id);
       showToast(t('results.deleted'), 'info');
       refreshResults();
     });
@@ -748,7 +872,7 @@ searchResults.addEventListener('input', refreshResults);
 
 btnDeleteAllResults.addEventListener('click', async () => {
   if (!(await appConfirm(t('results.delete.all.confirm')))) return;
-  await window.api.deleteAllQuizResults();
+  await appApi.deleteAllQuizResults();
   showToast(t('results.all.deleted'), 'info');
   refreshResults();
 });
@@ -756,8 +880,8 @@ btnDeleteAllResults.addEventListener('click', async () => {
 // ==================== STUDENT: TOPIC SELECTION ====================
 
 async function refreshStudentTopics() {
-  const availableTopics = await window.api.getSelectedTopics();
-  const mySelections = await window.api.getStudentSelections(currentUser.name);
+  const availableTopics = await appApi.getSelectedTopics();
+  const mySelections = await appApi.getStudentSelections(currentUser.name);
 
   studentTopicsList.innerHTML = '';
 
@@ -772,7 +896,7 @@ async function refreshStudentTopics() {
 
   for (const topic of availableTopics) {
     const isSelected = mySelections.includes(topic.id);
-    const moduleCount = (topic.modules || []).length;
+    const moduleCount = (topic.modules || []).filter(m => m.moduleSelected !== false).length;
     const card = document.createElement('div');
     card.className = `topic-card student-topic-card ${isSelected ? 'topic-selected' : ''}`;
     card.innerHTML = `
@@ -794,13 +918,13 @@ async function refreshStudentTopics() {
     `;
 
     card.querySelector('.student-topic-toggle').addEventListener('change', async (e) => {
-      let selections = await window.api.getStudentSelections(currentUser.name);
+      let selections = await appApi.getStudentSelections(currentUser.name);
       if (e.target.checked) {
         if (!selections.includes(topic.id)) selections.push(topic.id);
       } else {
         selections = selections.filter((id) => id !== topic.id);
       }
-      await window.api.saveStudentSelections(currentUser.name, selections);
+      await appApi.saveStudentSelections(currentUser.name, selections);
       showToast(e.target.checked ? t('student.topics.selected') : t('student.topics.deselected'), 'info');
       refreshStudentTopics();
     });
@@ -812,8 +936,8 @@ async function refreshStudentTopics() {
 // ==================== STUDENT: QUIZ MODE ====================
 
 async function refreshQuizTopicSelect() {
-  const mySelections = await window.api.getStudentSelections(currentUser.name);
-  const availableTopics = await window.api.getSelectedTopics();
+  const mySelections = await appApi.getStudentSelections(currentUser.name);
+  const availableTopics = await appApi.getSelectedTopics();
   const myTopics = availableTopics.filter((t) => mySelections.includes(t.id));
 
   quizTopicSelect.innerHTML = '';
@@ -831,7 +955,7 @@ async function refreshQuizTopicSelect() {
   }
 
   for (const topic of myTopics) {
-    const moduleCount = (topic.modules || []).length;
+    const moduleCount = (topic.modules || []).filter(m => m.moduleSelected !== false).length;
     if (moduleCount === 0) continue;
 
     const card = document.createElement('div');
@@ -853,7 +977,7 @@ async function refreshQuizTopicSelect() {
 }
 
 async function startQuiz(topic) {
-  const modules = topic.modules || [];
+  const modules = (topic.modules || []).filter(m => m.moduleSelected !== false);
   if (modules.length === 0) {
     showToast(t('quiz.no.modules'), 'error');
     return;
@@ -948,14 +1072,20 @@ function collectQuizAnswer(mod) {
       break;
     }
     case 'trueFalse': {
-      const feedback = quizModuleContainer.querySelector('#tfFeedback');
-      if (feedback && feedback.innerHTML.includes('✓')) {
-        result.isCorrect = true;
-        result.userAnswer = content.correctAnswer === 'true' ? 'Wahr' : 'Falsch';
-      } else {
-        result.userAnswer = content.correctAnswer === 'true' ? 'Falsch' : 'Wahr';
-      }
-      result.correctAnswer = content.correctAnswer === 'true' ? 'Wahr' : 'Falsch';
+      const tfQs = content.questions || [content];
+      let tfCorrectCount = 0;
+      const tfUserAnswers = [];
+      const tfCorrectAnswers = [];
+      tfQs.forEach((q) => {
+        const isCorrect = q._userAnswer === q.correctAnswer;
+        if (isCorrect) tfCorrectCount++;
+        tfUserAnswers.push(q._userAnswer === 'true' ? 'Wahr' : (q._userAnswer === 'false' ? 'Falsch' : '—'));
+        tfCorrectAnswers.push(q.correctAnswer === 'true' ? 'Wahr' : 'Falsch');
+      });
+      result.isCorrect = tfCorrectCount === tfQs.length;
+      result.userAnswer = tfUserAnswers.join(', ');
+      result.correctAnswer = tfCorrectAnswers.join(', ');
+      result.score = `${tfCorrectCount}/${tfQs.length}`;
       break;
     }
     case 'fillInTheBlanks': {
@@ -966,12 +1096,13 @@ function collectQuizAnswer(mod) {
         const expected = inp.dataset.answer;
         const given = inp.value.trim();
         const caseSensitive = content.caseSensitive;
-        const match = caseSensitive ? given === expected : given.toLowerCase() === expected.toLowerCase();
+        const alternatives = expected.split('/').map(a => a.trim()).filter(Boolean);
+        const match = alternatives.some(alt => caseSensitive ? given === alt : given.toLowerCase() === alt.toLowerCase());
         if (match) correct++;
         answers.push(given);
       });
       result.userAnswer = answers.join(', ');
-      result.correctAnswer = Array.from(inputs).map((i) => i.dataset.answer).join(', ');
+      result.correctAnswer = Array.from(inputs).map((i) => i.dataset.answer.split('/')[0].trim()).join(', ');
       result.isCorrect = correct === inputs.length && inputs.length > 0;
       break;
     }
@@ -987,8 +1118,7 @@ function collectQuizAnswer(mod) {
       }
       break;
     }
-    case 'markTheWords':
-    case 'dragTheWords': {
+    case 'markTheWords': {
       const spans = quizModuleContainer.querySelectorAll('#wordsArea span');
       let correct = 0;
       let total = 0;
@@ -997,6 +1127,20 @@ function collectQuizAnswer(mod) {
         if (s.classList.contains('selected') && s.dataset.correct === 'true') correct++;
       });
       result.userAnswer = `${correct}/${total} markiert`;
+      result.correctAnswer = `${total}/${total}`;
+      result.isCorrect = correct === total && total > 0;
+      break;
+    }
+    case 'dragTheWords': {
+      const zones = quizModuleContainer.querySelectorAll('.dtw-drop-zone');
+      let correct = 0;
+      const total = zones.length;
+      zones.forEach((z) => {
+        const current = (z.dataset.currentWord || '').trim();
+        const expected = z.dataset.correctWord;
+        if (current.toLowerCase() === expected.toLowerCase()) correct++;
+      });
+      result.userAnswer = `${correct}/${total} richtig zugeordnet`;
       result.correctAnswer = `${total}/${total}`;
       result.isCorrect = correct === total && total > 0;
       break;
@@ -1010,6 +1154,42 @@ function collectQuizAnswer(mod) {
       result.userAnswer = `${correct}/${inputs.length}`;
       result.correctAnswer = `${inputs.length}/${inputs.length}`;
       result.isCorrect = correct === inputs.length && inputs.length > 0;
+      break;
+    }
+    case 'dragAndDrop': {
+      const dragEls = quizModuleContainer.querySelectorAll('.dnd-player-drag');
+      let correct = 0;
+      let total = 0;
+      const placements = [];
+      dragEls.forEach((el) => {
+        const correctZone = el.dataset.correctZone || '';
+        const currentZone = el.dataset.currentZone || '';
+        if (correctZone) {
+          total++;
+          if (currentZone === correctZone) correct++;
+        }
+        placements.push(`${el.textContent} → ${currentZone || '(nicht zugeordnet)'}`);
+      });
+      result.userAnswer = placements.join(', ');
+      result.correctAnswer = (content.draggables || []).filter((d) => d.correctZone).map((d) => `${d.text} → ${d.correctZone}`).join(', ');
+      result.isCorrect = total > 0 && correct === total;
+      break;
+    }
+    case 'flashcards': {
+      const cards = content.cards || [];
+      let correct = 0;
+      const answers = [];
+      cards.forEach((card) => {
+        const user = (card._userAnswer || '').trim();
+        const expected = card.answer || '';
+        const alternatives = expected.split('/').map(a => a.trim().toLowerCase()).filter(Boolean);
+        const ok = alternatives.includes(user.toLowerCase());
+        if (ok) correct++;
+        answers.push(`${user || '—'} (${ok ? '✓' : '✗'})`);
+      });
+      result.userAnswer = `${correct}/${cards.length} richtig`;
+      result.correctAnswer = `${cards.length}/${cards.length}`;
+      result.isCorrect = correct === cards.length && cards.length > 0;
       break;
     }
     default: {
@@ -1039,7 +1219,7 @@ async function finishQuiz() {
     details: quizState.answers,
   };
 
-  await window.api.saveQuizResult(resultData);
+  await appApi.saveQuizResult(resultData);
 
   // Show result screen
   quizPlayerArea.classList.add('hidden');
@@ -1193,51 +1373,315 @@ function createTypePreview(type, content) {
       break;
     }
     case 'trueFalse': {
-      div.innerHTML = `<div style="padding:20px; background:var(--bg-primary); border-radius:var(--radius-md);">
-        <p style="font-weight:600; margin-bottom:16px;">${escapeHtml(content.question || '')}</p>
-        <div style="display:flex; gap:12px;">
-          <button class="btn btn-secondary tf-btn" data-val="true">Wahr</button>
-          <button class="btn btn-secondary tf-btn" data-val="false">Falsch</button>
-        </div>
-        <div id="tfFeedback" style="margin-top:12px;"></div>
-      </div>`;
-      div.querySelectorAll('.tf-btn').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const correct = content.correctAnswer === btn.dataset.val;
-          div.querySelector('#tfFeedback').innerHTML = correct
-            ? `<span style="color:green; font-weight:600;">✓ ${escapeHtml(content.feedbackCorrect || 'Richtig!')}</span>`
-            : `<span style="color:red; font-weight:600;">✗ ${escapeHtml(content.feedbackWrong || 'Leider falsch.')}</span>`;
-        });
-      });
+      // Support old flat format (single question) and new list format
+      const tfQuestions = content.questions || [content];
+      if (tfQuestions.length === 0) { div.textContent = 'Keine Fragen definiert.'; break; }
+
+      let tfIdx = 0;
+      div.innerHTML = `
+        <div class="tf-player">
+          <div class="tf-progress"><span id="tfProgress">Frage 1 von ${tfQuestions.length}</span></div>
+          <div class="tf-card">
+            <p id="tfQuestion" class="tf-question"></p>
+            <div class="tf-buttons">
+              <button class="btn btn-secondary tf-btn" id="tfTrue" data-val="true">Wahr</button>
+              <button class="btn btn-secondary tf-btn" id="tfFalse" data-val="false">Falsch</button>
+            </div>
+            <div id="tfFeedback" class="tf-feedback"></div>
+          </div>
+          <div class="tf-nav">
+            <button class="btn btn-secondary btn-sm" id="tfPrev">← Zurück</button>
+            <span id="tfScore" class="tf-score"></span>
+            <button class="btn btn-secondary btn-sm" id="tfNext">Weiter →</button>
+          </div>
+        </div>`;
+
+      const tfQuestion = div.querySelector('#tfQuestion');
+      const tfFeedback = div.querySelector('#tfFeedback');
+      const tfProgress = div.querySelector('#tfProgress');
+      const tfScore = div.querySelector('#tfScore');
+      const tfTrue = div.querySelector('#tfTrue');
+      const tfFalse = div.querySelector('#tfFalse');
+      const tfResults = tfQuestions.map(() => null); // null = unanswered
+
+      const showTfQuestion = () => {
+        const q = tfQuestions[tfIdx];
+        tfQuestion.textContent = q.question || '';
+        tfProgress.textContent = `Frage ${tfIdx + 1} von ${tfQuestions.length}`;
+        if (tfResults[tfIdx] !== null) {
+          tfTrue.disabled = true;
+          tfFalse.disabled = true;
+          tfTrue.classList.remove('tf-selected');
+          tfFalse.classList.remove('tf-selected');
+          if (q._userAnswer === 'true') tfTrue.classList.add('tf-selected');
+          if (q._userAnswer === 'false') tfFalse.classList.add('tf-selected');
+          const correct = tfResults[tfIdx];
+          tfFeedback.innerHTML = correct
+            ? `<span class="tf-correct">✓ ${escapeHtml(q.feedbackCorrect || 'Richtig!')}</span>`
+            : `<span class="tf-wrong">✗ ${escapeHtml(q.feedbackWrong || 'Leider falsch.')}</span>`;
+          tfFeedback.className = 'tf-feedback ' + (correct ? 'tf-feedback-correct' : 'tf-feedback-wrong');
+        } else {
+          tfTrue.disabled = false;
+          tfFalse.disabled = false;
+          tfTrue.classList.remove('tf-selected');
+          tfFalse.classList.remove('tf-selected');
+          tfFeedback.innerHTML = '';
+          tfFeedback.className = 'tf-feedback';
+        }
+        updateTfScore();
+      };
+
+      const updateTfScore = () => {
+        const answered = tfResults.filter(r => r !== null).length;
+        const correct = tfResults.filter(r => r === true).length;
+        tfScore.textContent = answered > 0 ? `${correct}/${answered} richtig` : '';
+      };
+
+      const handleTfAnswer = (val) => {
+        if (tfResults[tfIdx] !== null) return;
+        const q = tfQuestions[tfIdx];
+        q._userAnswer = val;
+        const correct = q.correctAnswer === val;
+        tfResults[tfIdx] = correct;
+        showTfQuestion();
+      };
+
+      tfTrue.addEventListener('click', () => handleTfAnswer('true'));
+      tfFalse.addEventListener('click', () => handleTfAnswer('false'));
+      div.querySelector('#tfPrev').addEventListener('click', () => { if (tfIdx > 0) { tfIdx--; showTfQuestion(); } });
+      div.querySelector('#tfNext').addEventListener('click', () => { if (tfIdx < tfQuestions.length - 1) { tfIdx++; showTfQuestion(); } });
+
+      showTfQuestion();
       break;
     }
     case 'dialogCards':
     case 'flashcards': {
       const cards = content.cards || [];
       if (cards.length === 0) { div.textContent = 'Keine Karten definiert.'; break; }
-      let idx = 0;
-      let flipped = false;
       const frontKey = type === 'dialogCards' ? 'front' : 'question';
       const backKey = type === 'dialogCards' ? 'back' : 'answer';
-      div.innerHTML = `
-        <div style="text-align:center;">
-          <div id="cardDisplay" style="padding:40px; min-height:150px; background:var(--accent-light); border-radius:var(--radius-md); cursor:pointer; font-size:1.2rem; display:flex; align-items:center; justify-content:center;">
-            ${escapeHtml(cards[0][frontKey] || '')}
+      const isFlashcards = type === 'flashcards';
+
+      if (isFlashcards) {
+        // H5P-style Flashcards: image + question, answer input, check, navigate
+        let idx = 0;
+        div.innerHTML = `
+          <div class="fc-player">
+            <div class="fc-card">
+              <div id="fcImage" class="fc-image"></div>
+              <div id="fcQuestion" class="fc-question"></div>
+              <div class="fc-answer-row">
+                <input type="text" id="fcInput" class="fc-input" placeholder="Antwort eingeben…" autocomplete="off" />
+                <button class="btn btn-primary btn-sm" id="fcCheck">Prüfen</button>
+              </div>
+              <div id="fcFeedback" class="fc-feedback"></div>
+            </div>
+            <div class="fc-nav">
+              <button class="btn btn-secondary btn-sm" id="fcPrev">← Zurück</button>
+              <span id="fcCounter" class="fc-counter">1 / ${cards.length}</span>
+              <span id="fcScore" class="fc-score"></span>
+              <button class="btn btn-secondary btn-sm" id="fcNext">Weiter →</button>
+            </div>
+          </div>`;
+
+        const fcImage = div.querySelector('#fcImage');
+        const fcQuestion = div.querySelector('#fcQuestion');
+        const fcInput = div.querySelector('#fcInput');
+        const fcCheck = div.querySelector('#fcCheck');
+        const fcFeedback = div.querySelector('#fcFeedback');
+        const fcCounter = div.querySelector('#fcCounter');
+        const fcScore = div.querySelector('#fcScore');
+        const cardResults = cards.map(() => null); // null = not answered, true/false
+
+        const showCard = () => {
+          const card = cards[idx];
+          // Image
+          if (card.imageUrl) {
+            fcImage.innerHTML = `<img src="${card.imageUrl}" />`;
+            fcImage.style.display = '';
+          } else {
+            fcImage.innerHTML = '';
+            fcImage.style.display = 'none';
+          }
+          fcQuestion.textContent = card[frontKey] || '';
+          fcCounter.textContent = `${idx + 1} / ${cards.length}`;
+
+          // Restore previous state or reset
+          if (cardResults[idx] !== null) {
+            fcInput.value = card._userAnswer || '';
+            fcInput.disabled = true;
+            fcCheck.disabled = true;
+            showFeedback(cardResults[idx], card[backKey]);
+          } else {
+            fcInput.value = '';
+            fcInput.disabled = false;
+            fcCheck.disabled = false;
+            fcFeedback.innerHTML = '';
+            fcFeedback.className = 'fc-feedback';
+          }
+          updateScore();
+        };
+
+        const showFeedback = (correct, answer) => {
+          if (correct) {
+            fcFeedback.innerHTML = `<span class="fc-correct">✅ Richtig!</span>`;
+            fcFeedback.className = 'fc-feedback fc-feedback-correct';
+          } else {
+            fcFeedback.innerHTML = `<span class="fc-wrong">❌ Falsch.</span> Richtige Antwort: <strong>${escapeHtml(answer)}</strong>`;
+            fcFeedback.className = 'fc-feedback fc-feedback-wrong';
+          }
+        };
+
+        const updateScore = () => {
+          const answered = cardResults.filter(r => r !== null).length;
+          const correct = cardResults.filter(r => r === true).length;
+          if (answered > 0) {
+            fcScore.textContent = `${correct}/${answered} richtig`;
+          } else {
+            fcScore.textContent = '';
+          }
+        };
+
+        fcCheck.addEventListener('click', () => {
+          const userAnswer = fcInput.value.trim();
+          if (!userAnswer) return;
+          const correctAnswer = cards[idx][backKey] || '';
+          const alternatives = correctAnswer.split('/').map(a => a.trim().toLowerCase()).filter(Boolean);
+          const isCorrect = alternatives.includes(userAnswer.toLowerCase());
+          cardResults[idx] = isCorrect;
+          cards[idx]._userAnswer = userAnswer;
+          fcInput.disabled = true;
+          fcCheck.disabled = true;
+          showFeedback(isCorrect, correctAnswer);
+          updateScore();
+        });
+
+        fcInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && !fcCheck.disabled) fcCheck.click();
+        });
+
+        div.querySelector('#fcPrev').addEventListener('click', () => { if (idx > 0) { idx--; showCard(); } });
+        div.querySelector('#fcNext').addEventListener('click', () => { if (idx < cards.length - 1) { idx++; showCard(); } });
+
+        showCard();
+      } else {
+        // dialogCards: click-to-flip with image + audio
+        let idx = 0;
+        let flipped = false;
+        div.innerHTML = `
+          <div class="dc-player">
+            <div class="dc-card">
+              <div id="dcImage" class="dc-image"></div>
+              <div id="dcAudio" class="dc-audio"></div>
+              <div id="cardDisplay" class="dc-display">
+                ${escapeHtml(cards[0][frontKey] || '')}
+              </div>
+              <p class="dc-hint">Klicken zum Umdrehen</p>
+              <div id="dcTip" class="dc-tip"></div>
+            </div>
+            <div class="dc-nav">
+              <button class="btn btn-secondary btn-sm" id="cardPrev">← Zurück</button>
+              <span id="cardCounter" class="dc-counter">1 / ${cards.length}</span>
+              <button class="btn btn-secondary btn-sm" id="cardNext">Weiter →</button>
+            </div>
           </div>
-          <p style="margin-top:8px; color:var(--text-secondary); font-size:0.85rem;">Klicken zum Umdrehen</p>
-          <div style="margin-top:16px; display:flex; justify-content:center; gap:12px;">
-            <button class="btn btn-secondary btn-sm" id="cardPrev">← Zurück</button>
-            <span id="cardCounter" style="line-height:36px;">1 / ${cards.length}</span>
-            <button class="btn btn-secondary btn-sm" id="cardNext">Weiter →</button>
-          </div>
-        </div>
-      `;
-      const cardDisplay = div.querySelector('#cardDisplay');
-      const cardCounter = div.querySelector('#cardCounter');
-      const updateCard = () => { flipped = false; cardDisplay.textContent = cards[idx][frontKey] || ''; cardDisplay.style.background = 'var(--accent-light)'; cardCounter.textContent = `${idx + 1} / ${cards.length}`; };
-      cardDisplay.addEventListener('click', () => { flipped = !flipped; cardDisplay.textContent = flipped ? (cards[idx][backKey] || '') : (cards[idx][frontKey] || ''); cardDisplay.style.background = flipped ? '#dcfce7' : 'var(--accent-light)'; });
-      div.querySelector('#cardPrev').addEventListener('click', () => { if (idx > 0) { idx--; updateCard(); } });
-      div.querySelector('#cardNext').addEventListener('click', () => { if (idx < cards.length - 1) { idx++; updateCard(); } });
+        `;
+        const cardDisplay = div.querySelector('#cardDisplay');
+        const cardCounter = div.querySelector('#cardCounter');
+        const dcImage = div.querySelector('#dcImage');
+        const dcAudio = div.querySelector('#dcAudio');
+        const dcTip = div.querySelector('#dcTip');
+
+        const showCardMedia = (card) => {
+          // Image
+          if (card.imageUrl) {
+            dcImage.innerHTML = `<img src="${card.imageUrl}" />`;
+            dcImage.style.display = '';
+          } else {
+            dcImage.innerHTML = '';
+            dcImage.style.display = 'none';
+          }
+          // Audio — use Web Audio API fallback for codec issues (e.g. MP3 on Linux)
+          if (card.audioUrl) {
+            dcAudio.innerHTML = '';
+            dcAudio.style.display = '';
+            const audioEl = document.createElement('audio');
+            audioEl.controls = true;
+            audioEl.style.cssText = 'width:100%;max-width:320px;';
+            audioEl.src = card.audioUrl;
+            dcAudio.appendChild(audioEl);
+
+            // Check if browser can play it; if not, use Web Audio API fallback
+            audioEl.addEventListener('error', () => {
+              dcAudio.innerHTML = '';
+              let playing = false;
+              let audioCtx = null;
+              let sourceNode = null;
+
+              const btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = 'btn btn-secondary btn-sm';
+              btn.textContent = '▶️ Audio abspielen';
+
+              btn.addEventListener('click', async () => {
+                if (playing) {
+                  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+                  playing = false;
+                  btn.textContent = '▶️ Audio abspielen';
+                  return;
+                }
+                try {
+                  audioCtx = new AudioContext();
+                  const resp = await fetch(card.audioUrl);
+                  const arrayBuf = await resp.arrayBuffer();
+                  const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
+                  sourceNode = audioCtx.createBufferSource();
+                  sourceNode.buffer = audioBuf;
+                  sourceNode.connect(audioCtx.destination);
+                  sourceNode.start(0);
+                  playing = true;
+                  btn.textContent = '⏹️ Stoppen';
+                  sourceNode.onended = () => {
+                    playing = false;
+                    btn.textContent = '▶️ Audio abspielen';
+                    if (audioCtx) { audioCtx.close(); audioCtx = null; }
+                  };
+                } catch (e) {
+                  btn.textContent = '❌ Audio nicht abspielbar';
+                  btn.disabled = true;
+                }
+              });
+              dcAudio.appendChild(btn);
+            }, { once: true });
+          } else {
+            dcAudio.innerHTML = '';
+            dcAudio.style.display = 'none';
+          }
+          // Tip
+          if (card.tip) {
+            dcTip.innerHTML = `<span class="dc-tip-icon" title="${escapeAttr(card.tip)}">💡 Hinweis</span>`;
+            dcTip.style.display = '';
+          } else {
+            dcTip.style.display = 'none';
+          }
+        };
+
+        showCardMedia(cards[0]);
+        const updateCard = () => {
+          flipped = false;
+          cardDisplay.textContent = cards[idx][frontKey] || '';
+          cardDisplay.style.background = 'var(--accent-light)';
+          cardCounter.textContent = `${idx + 1} / ${cards.length}`;
+          showCardMedia(cards[idx]);
+        };
+        cardDisplay.addEventListener('click', () => {
+          flipped = !flipped;
+          cardDisplay.textContent = flipped ? (cards[idx][backKey] || '') : (cards[idx][frontKey] || '');
+          cardDisplay.style.background = flipped ? '#dcfce7' : 'var(--accent-light)';
+        });
+        div.querySelector('#cardPrev').addEventListener('click', () => { if (idx > 0) { idx--; updateCard(); } });
+        div.querySelector('#cardNext').addEventListener('click', () => { if (idx < cards.length - 1) { idx++; updateCard(); } });
+      }
       break;
     }
     case 'fillInTheBlanks': {
@@ -1273,7 +1717,8 @@ function createTypePreview(type, content) {
         const caseSensitive = content.caseSensitive;
         answerMap.forEach(({ answer, inputEl }) => {
           const userVal = inputEl.value.trim();
-          const match = caseSensitive ? userVal === answer : userVal.toLowerCase() === answer.toLowerCase();
+          const alternatives = answer.split('/').map(a => a.trim()).filter(Boolean);
+          const match = alternatives.some(alt => caseSensitive ? userVal === alt : userVal.toLowerCase() === alt.toLowerCase());
           inputEl.style.borderColor = match ? 'green' : 'red';
           if (match) correct++;
         });
@@ -1281,7 +1726,145 @@ function createTypePreview(type, content) {
       });
       break;
     }
-    case 'dragTheWords':
+    case 'dragTheWords': {
+      div.innerHTML = `<div class="dtw-container">
+        ${content.taskDescription ? `<p class="dtw-description">${escapeHtml(content.taskDescription)}</p>` : ''}
+        <div class="dtw-text-area" id="dtwTextArea"></div>
+        <div class="dtw-word-bank" id="dtwWordBank"></div>
+        <button class="btn btn-primary btn-sm" style="margin-top:16px;" id="dtwCheck">Überprüfen</button>
+        <div id="dtwFeedback" style="margin-top:12px;"></div>
+      </div>`;
+      const text = content.textField || '';
+      const textArea = div.querySelector('#dtwTextArea');
+      const wordBank = div.querySelector('#dtwWordBank');
+      const parts = text.split(/(\*[^*]+\*)/g);
+      const draggableWords = [];
+      let dropIdx = 0;
+
+      parts.forEach((part) => {
+        const match = part.match(/^\*(.+)\*$/);
+        if (match) {
+          const correctWord = match[1];
+          draggableWords.push(correctWord);
+          const dropZone = document.createElement('span');
+          dropZone.className = 'dtw-drop-zone';
+          dropZone.dataset.correctWord = correctWord;
+          dropZone.dataset.dropIdx = dropIdx++;
+          dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dtw-drop-hover'); });
+          dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('dtw-drop-hover'); });
+          dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dtw-drop-hover');
+            const word = e.dataTransfer.getData('text/plain');
+            const srcId = e.dataTransfer.getData('application/dtw-src');
+            // Return existing word to bank if slot is occupied
+            if (dropZone.dataset.currentWord) {
+              returnWordToBank(dropZone.dataset.currentWord, wordBank);
+            }
+            dropZone.textContent = word;
+            dropZone.dataset.currentWord = word;
+            dropZone.classList.add('dtw-drop-filled');
+            // Remove dragged chip from bank
+            const srcEl = wordBank.querySelector(`[data-dtw-id="${srcId}"]`);
+            if (srcEl) srcEl.classList.add('dtw-chip-used');
+            // If dragged from another drop zone, clear that one
+            const fromZone = e.dataTransfer.getData('application/dtw-from-zone');
+            if (fromZone) {
+              const prevZone = textArea.querySelector(`.dtw-drop-zone[data-drop-idx="${fromZone}"]`);
+              if (prevZone && prevZone !== dropZone) {
+                prevZone.textContent = '';
+                prevZone.dataset.currentWord = '';
+                prevZone.classList.remove('dtw-drop-filled');
+              }
+            }
+          });
+          // Allow dragging words out of a filled drop zone
+          dropZone.setAttribute('draggable', 'false');
+          dropZone.addEventListener('mousedown', (e) => {
+            if (dropZone.dataset.currentWord) dropZone.setAttribute('draggable', 'true');
+          });
+          dropZone.addEventListener('dragstart', (e) => {
+            if (!dropZone.dataset.currentWord) { e.preventDefault(); return; }
+            e.dataTransfer.setData('text/plain', dropZone.dataset.currentWord);
+            e.dataTransfer.setData('application/dtw-src', '');
+            e.dataTransfer.setData('application/dtw-from-zone', dropZone.dataset.dropIdx);
+            e.dataTransfer.effectAllowed = 'move';
+          });
+          dropZone.addEventListener('dragend', () => { dropZone.setAttribute('draggable', 'false'); });
+          textArea.appendChild(dropZone);
+        } else {
+          if (part.trim()) {
+            const textNode = document.createElement('span');
+            textNode.className = 'dtw-static-text';
+            textNode.textContent = part;
+            textArea.appendChild(textNode);
+          }
+        }
+      });
+
+      // Shuffle and create word bank chips
+      const shuffled = [...draggableWords].sort(() => Math.random() - 0.5);
+      shuffled.forEach((word, i) => {
+        const chip = document.createElement('span');
+        chip.className = 'dtw-chip';
+        chip.textContent = word;
+        chip.setAttribute('draggable', 'true');
+        chip.dataset.dtwId = `chip_${i}`;
+        chip.addEventListener('dragstart', (e) => {
+          e.dataTransfer.setData('text/plain', word);
+          e.dataTransfer.setData('application/dtw-src', chip.dataset.dtwId);
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        wordBank.appendChild(chip);
+      });
+
+      function returnWordToBank(word, bank) {
+        const chips = bank.querySelectorAll('.dtw-chip');
+        for (const c of chips) {
+          if (c.textContent === word && c.classList.contains('dtw-chip-used')) {
+            c.classList.remove('dtw-chip-used');
+            break;
+          }
+        }
+      }
+
+      // Allow dropping back to word bank to remove a word from a slot
+      wordBank.addEventListener('dragover', (e) => e.preventDefault());
+      wordBank.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const fromZone = e.dataTransfer.getData('application/dtw-from-zone');
+        const word = e.dataTransfer.getData('text/plain');
+        if (fromZone) {
+          const prevZone = textArea.querySelector(`.dtw-drop-zone[data-drop-idx="${fromZone}"]`);
+          if (prevZone) {
+            prevZone.textContent = '';
+            prevZone.dataset.currentWord = '';
+            prevZone.classList.remove('dtw-drop-filled');
+          }
+          returnWordToBank(word, wordBank);
+        }
+      });
+
+      div.querySelector('#dtwCheck').addEventListener('click', () => {
+        const zones = textArea.querySelectorAll('.dtw-drop-zone');
+        let correct = 0;
+        zones.forEach((z) => {
+          z.classList.remove('dtw-correct', 'dtw-wrong', 'dtw-missing');
+          const current = (z.dataset.currentWord || '').trim();
+          const expected = z.dataset.correctWord;
+          if (current.toLowerCase() === expected.toLowerCase()) {
+            z.classList.add('dtw-correct');
+            correct++;
+          } else if (current) {
+            z.classList.add('dtw-wrong');
+          } else {
+            z.classList.add('dtw-missing');
+          }
+        });
+        div.querySelector('#dtwFeedback').innerHTML = `<span style="font-weight:600;">${correct} von ${zones.length} richtig</span>`;
+      });
+      break;
+    }
     case 'markTheWords': {
       div.innerHTML = `<div style="padding:20px; background:var(--bg-primary); border-radius:var(--radius-md);">
         ${content.taskDescription ? `<p style="margin-bottom:16px;">${escapeHtml(content.taskDescription)}</p>` : ''}
@@ -1293,32 +1876,36 @@ function createTypePreview(type, content) {
       const wordsArea = div.querySelector('#wordsArea');
       const parts = text.split(/\*([^*]+)\*/g);
       const correctWords = [];
+      const makeWordSpan = (word, isCorrect) => {
+        const span = document.createElement('span');
+        span.style.cssText = 'display:inline-block; padding:4px 8px; margin:2px; border-radius:4px; cursor:pointer; border: 1px solid transparent;';
+        span.textContent = word;
+        span.dataset.correct = isCorrect ? 'true' : 'false';
+        if (isCorrect) correctWords.push(span);
+        span.addEventListener('click', () => {
+          span.classList.toggle('selected');
+          span.style.background = span.classList.contains('selected') ? 'var(--accent-light)' : '';
+          span.style.borderColor = span.classList.contains('selected') ? 'var(--accent)' : 'transparent';
+        });
+        return span;
+      };
       parts.forEach((part, pi) => {
         if (pi % 2 === 0) {
-          part.split(/\s+/).filter(Boolean).forEach((word) => {
-            const span = document.createElement('span');
-            span.style.cssText = 'display:inline-block; padding:4px 8px; margin:2px; border-radius:4px; cursor:pointer; border: 1px solid transparent;';
-            span.textContent = word;
-            span.dataset.correct = 'false';
-            span.addEventListener('click', () => {
-              span.classList.toggle('selected');
-              span.style.background = span.classList.contains('selected') ? 'var(--accent-light)' : '';
-              span.style.borderColor = span.classList.contains('selected') ? 'var(--accent)' : 'transparent';
+          const lines = part.split(/\n/);
+          lines.forEach((line, li) => {
+            if (li > 0) wordsArea.appendChild(document.createElement('br'));
+            const indent = line.match(/^[\t ]*/)[0].replace(/\t/g, '    ');
+            if (indent.length > 0) {
+              const spacer = document.createElement('span');
+              spacer.style.cssText = `display:inline-block; width:${indent.length * 0.5}em;`;
+              wordsArea.appendChild(spacer);
+            }
+            line.trim().split(/\s+/).filter(Boolean).forEach((word) => {
+              wordsArea.appendChild(makeWordSpan(word, false));
             });
-            wordsArea.appendChild(span);
           });
         } else {
-          const span = document.createElement('span');
-          span.style.cssText = 'display:inline-block; padding:4px 8px; margin:2px; border-radius:4px; cursor:pointer; border: 1px solid transparent;';
-          span.textContent = part;
-          span.dataset.correct = 'true';
-          correctWords.push(span);
-          span.addEventListener('click', () => {
-            span.classList.toggle('selected');
-            span.style.background = span.classList.contains('selected') ? 'var(--accent-light)' : '';
-            span.style.borderColor = span.classList.contains('selected') ? 'var(--accent)' : 'transparent';
-          });
-          wordsArea.appendChild(span);
+          wordsArea.appendChild(makeWordSpan(part, true));
         }
       });
       div.querySelector('#wordsCheck').addEventListener('click', () => {
@@ -1394,50 +1981,109 @@ function createTypePreview(type, content) {
       break;
     }
     case 'dragAndDrop': {
-      div.innerHTML = `<div style="padding:20px; background:var(--bg-primary); border-radius:var(--radius-md);">
-        ${content.taskDescription ? `<p style="margin-bottom:16px;">${escapeHtml(content.taskDescription)}</p>` : ''}
-        <div style="display:flex; gap:24px; flex-wrap:wrap;">
-          <div style="flex:1; min-width:200px;">
-            <h4 style="margin-bottom:8px;">Elemente:</h4>
-            <div id="dndDraggables" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
-          </div>
-          <div style="flex:1; min-width:200px;">
-            <h4 style="margin-bottom:8px;">Zielzonen:</h4>
-            <div id="dndZones"></div>
-          </div>
+      const hasImage = !!content.backgroundImage;
+      const zones = content.dropZones || [];
+      const drags = content.draggables || [];
+      const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
+
+      div.innerHTML = `<div class="dnd-player">
+        ${content.taskDescription ? `<p class="dnd-player-desc">${escapeHtml(content.taskDescription)}</p>` : ''}
+        <div class="dnd-player-draggables" id="dndDraggables"></div>
+        <div class="dnd-player-canvas-wrap">
+          ${hasImage
+            ? `<div class="dnd-player-canvas" id="dndCanvas">
+                <img src="${content.backgroundImage}" class="dnd-player-img" draggable="false" />
+              </div>`
+            : `<div class="dnd-player-canvas dnd-player-no-img" id="dndCanvas">
+                <div id="dndZonesLegacy"></div>
+              </div>`
+          }
         </div>
         <div id="dndFeedback" style="margin-top:16px;"></div>
       </div>`;
-      const zonesEl = div.querySelector('#dndZones');
+
+      const canvasEl = div.querySelector('#dndCanvas');
       const dragsEl = div.querySelector('#dndDraggables');
-      const zones = content.dropZones || [];
-      const drags = content.draggables || [];
-      zones.forEach((z) => {
-        const zone = document.createElement('div');
-        zone.style.cssText = 'padding:16px; border:2px dashed var(--border); border-radius:var(--radius-sm); margin-bottom:8px; min-height:50px;';
-        zone.innerHTML = `<strong>${escapeHtml(z.label)}</strong><div class="zone-items" data-zone="${escapeAttr(z.label)}" style="margin-top:8px;"></div>`;
-        zonesEl.appendChild(zone);
+
+      // Render drop zones on image
+      zones.forEach((z, i) => {
+        const zoneEl = document.createElement('div');
+        zoneEl.className = 'dnd-player-zone';
+        const color = colors[i % colors.length];
+        if (hasImage && z.x !== undefined) {
+          zoneEl.style.left = z.x + '%';
+          zoneEl.style.top = z.y + '%';
+          zoneEl.style.width = (z.width || 20) + '%';
+          zoneEl.style.height = (z.height || 15) + '%';
+        } else {
+          zoneEl.style.position = 'relative';
+          zoneEl.style.minHeight = '50px';
+          zoneEl.style.marginBottom = '8px';
+        }
+        zoneEl.style.borderColor = color;
+        zoneEl.style.background = hexToRgba(color, 0.92);
+        zoneEl.dataset.zone = z.label;
+        zoneEl.innerHTML = `<span class="dnd-player-zone-label" style="background:${color}">${escapeHtml(z.label)}</span>
+          <div class="dnd-player-zone-items" data-zone="${escapeAttr(z.label)}"></div>`;
+
+        // Drop handler
+        zoneEl.addEventListener('dragover', (e) => { e.preventDefault(); zoneEl.classList.add('dnd-zone-hover'); });
+        zoneEl.addEventListener('dragleave', () => { zoneEl.classList.remove('dnd-zone-hover'); });
+        zoneEl.addEventListener('drop', (e) => {
+          e.preventDefault();
+          zoneEl.classList.remove('dnd-zone-hover');
+          const dragId = e.dataTransfer.getData('text/plain');
+          const dragBtn = div.querySelector(`[data-drag-id="${dragId}"]`);
+          if (dragBtn) {
+            dragBtn.dataset.currentZone = z.label;
+            zoneEl.querySelector('.dnd-player-zone-items').appendChild(dragBtn);
+            dragBtn.classList.add('placed');
+          }
+        });
+
+        if (hasImage) {
+          canvasEl.appendChild(zoneEl);
+        } else {
+          div.querySelector('#dndZonesLegacy').appendChild(zoneEl);
+        }
       });
-      drags.forEach((d) => {
-        const drag = document.createElement('button');
-        drag.className = 'btn btn-secondary btn-sm';
+
+      // Render draggable elements
+      drags.forEach((d, i) => {
+        const drag = document.createElement('div');
+        drag.className = 'dnd-player-drag';
         drag.textContent = d.text;
+        drag.draggable = true;
+        drag.dataset.dragId = 'drag-' + i;
         drag.dataset.correctZone = d.correctZone || '';
+        drag.dataset.currentZone = '';
+
+        drag.addEventListener('dragstart', (e) => {
+          e.dataTransfer.setData('text/plain', drag.dataset.dragId);
+          drag.classList.add('dragging');
+        });
+        drag.addEventListener('dragend', () => {
+          drag.classList.remove('dragging');
+        });
+
+        // Also support click-to-cycle for touch/accessibility
         drag.addEventListener('click', () => {
           const currentZone = drag.dataset.currentZone || '';
           const zoneNames = zones.map((z) => z.label);
-          const nextIdx = currentZone ? (zoneNames.indexOf(currentZone) + 1) % (zoneNames.length + 1) : 0;
+          const currentIdx = zoneNames.indexOf(currentZone);
+          const nextIdx = (currentIdx + 1) % (zoneNames.length + 1);
           if (nextIdx >= zoneNames.length) {
             drag.dataset.currentZone = '';
-            drag.style.opacity = '1';
+            drag.classList.remove('placed');
             dragsEl.appendChild(drag);
           } else {
             drag.dataset.currentZone = zoneNames[nextIdx];
-            drag.style.opacity = '0.7';
-            const zoneEl = zonesEl.querySelector(`[data-zone="${escapeAttr(zoneNames[nextIdx])}"]`);
-            if (zoneEl) zoneEl.appendChild(drag);
+            drag.classList.add('placed');
+            const zoneItemsEl = canvasEl.querySelector(`[data-zone="${escapeAttr(zoneNames[nextIdx])}"]`);
+            if (zoneItemsEl) zoneItemsEl.appendChild(drag);
           }
         });
+
         dragsEl.appendChild(drag);
       });
       break;
@@ -1581,9 +2227,9 @@ function startArithmeticQuiz(container, content) {
 
 // ==================== MENU HANDLERS ====================
 
-window.api.onMenuImport(async () => {
+appApi.onMenuImport(async () => {
   if (currentUser && currentUser.role === 'teacher') {
-    const result = await window.api.importTopic();
+    const result = await appApi.importTopic();
     if (result.success) {
       showToast(t('topics.import.success', { title: result.topicTitle, count: result.importedCount || 0 }), 'success');
       await loadTopics();
@@ -1592,9 +2238,9 @@ window.api.onMenuImport(async () => {
   }
 });
 
-window.api.onMenuExport(async () => {
+appApi.onMenuExport(async () => {
   if (currentUser && currentUser.role === 'teacher' && currentTopicId) {
-    const result = await window.api.exportTopic(currentTopicId);
+    const result = await appApi.exportTopic(currentTopicId);
     if (result.success) showToast(t('topics.exported'), 'success');
   }
 });
@@ -1613,6 +2259,13 @@ function escapeHtml(str) {
 
 function escapeAttr(str) {
   return (str || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 // ==================== INITIALIZATION ====================
@@ -1651,6 +2304,43 @@ async function init() {
   applyTranslations();
   contentEditor = new ContentEditorManager(contentEditorEl);
   populateTypeSelects();
+
+  // Show network QR code for WLAN access (Electron only)
+  if (isElectron && appApi.getWebServerUrl) {
+    const showNetworkQr = async () => {
+      try {
+        const url = await appApi.getWebServerUrl();
+        if (url) {
+          const qrDiv = document.getElementById('networkQr');
+          const qrImg = document.getElementById('networkQrImg');
+          const qrUrl = document.getElementById('networkQrUrl');
+          qrImg.src = url + '/api/qrcode.svg';
+          qrUrl.textContent = url;
+          qrDiv.classList.remove('hidden');
+          return true;
+        }
+      } catch (e) { /* ignore */ }
+      return false;
+    };
+    // Server may need a moment to start — retry a few times
+    if (!(await showNetworkQr())) {
+      let retries = 5;
+      const timer = setInterval(async () => {
+        if ((await showNetworkQr()) || --retries <= 0) clearInterval(timer);
+      }, 1000);
+    }
+  }
+
+  // In browser mode: hide admin login, force student-only
+  if (!isElectron) {
+    const adminToggle = document.getElementById('btnShowAdminLogin');
+    if (adminToggle) adminToggle.style.display = 'none';
+    const adminSection = document.getElementById('adminLoginSection');
+    if (adminSection) adminSection.style.display = 'none';
+    // Hide the network QR (not relevant in browser)
+    const netQr = document.getElementById('networkQr');
+    if (netQr) netQr.style.display = 'none';
+  }
 }
 
 init();
