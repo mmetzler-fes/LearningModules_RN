@@ -19,12 +19,12 @@
   "author": "Martin Metzler",
   "license": "GPL-3.0",
   "dependencies": {
-    "electron": "^41.0.3",
     "express": "^4.22.1",
     "h5p-standalone": "^3.8.0",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
+    "electron": "^41.0.3",
     "electron-builder": "^26.8.1"
   },
   "build": {
@@ -48,7 +48,8 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "mac": {
       "target": [
