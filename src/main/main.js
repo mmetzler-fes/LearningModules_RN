@@ -62,17 +62,48 @@ const WEB_PORT = 3000;
 let webServerUrl = null;
 
 // --- Network helpers ---
-function getLocalIPs() {
+function getPreferredIP() {
   const interfaces = os.networkInterfaces();
-  const ips = [];
+  
+  // Kategorisiere Netzwerk-Interfaces
+  let wlanIPs = [];
+  let lanIPs = [];
+  let otherIPs = [];
+
   for (const name of Object.keys(interfaces)) {
+    // Bestimme Typ des Interfaces basierend auf Namen
+    const lowerName = name.toLowerCase();
+    const isWLAN = /wi-?fi|wlan|wireless/.test(lowerName);
+    const isLAN = /ethernet|eth|en\d|bridge/.test(lowerName);
+
     for (const iface of interfaces[name]) {
       if (iface.family === 'IPv4' && !iface.internal) {
-        ips.push(iface.address);
+        if (isWLAN) {
+          wlanIPs.push(iface.address);
+        } else if (isLAN) {
+          lanIPs.push(iface.address);
+        } else {
+          otherIPs.push(iface.address);
+        }
       }
     }
   }
-  return ips;
+
+  // Bevorzuge WLAN > LAN > Andere
+  if (wlanIPs.length > 0) {
+    console.log(`WLAN IP gefunden: ${wlanIPs[0]}`);
+    return wlanIPs[0];
+  }
+  if (lanIPs.length > 0) {
+    console.log(`LAN IP gefunden: ${lanIPs[0]}`);
+    return lanIPs[0];
+  }
+  if (otherIPs.length > 0) {
+    console.log(`Andere IP gefunden: ${otherIPs[0]}`);
+    return otherIPs[0];
+  }
+  
+  return null;
 }
 
 // --- Embedded Web Server for WLAN access ---
@@ -144,10 +175,10 @@ function startWebServer() {
   });
 
   const server = web.listen(WEB_PORT, '0.0.0.0', () => {
-    const ips = getLocalIPs();
+    const ip = getPreferredIP();
     const port = server.address().port;
-    if (ips.length > 0) {
-      webServerUrl = `http://${ips[0]}:${port}`;
+    if (ip) {
+      webServerUrl = `http://${ip}:${port}`;
       console.log(`Web-Server gestartet: ${webServerUrl}`);
     } else {
       webServerUrl = `http://localhost:${port}`;
@@ -158,10 +189,10 @@ function startWebServer() {
     if (err.code === 'EADDRINUSE') {
       console.log(`Port ${WEB_PORT} belegt, versuche alternativen Port...`);
       const altServer = web.listen(0, '0.0.0.0', () => {
-        const ips = getLocalIPs();
+        const ip = getPreferredIP();
         const port = altServer.address().port;
-        if (ips.length > 0) {
-          webServerUrl = `http://${ips[0]}:${port}`;
+        if (ip) {
+          webServerUrl = `http://${ip}:${port}`;
         } else {
           webServerUrl = `http://localhost:${port}`;
         }
