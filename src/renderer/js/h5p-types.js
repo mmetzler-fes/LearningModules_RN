@@ -167,6 +167,19 @@ const H5P_TYPES = {
         placeholder: 'Die *Sonne* scheint am *Himmel*.' },
     ],
   },
+  essay: {
+    id: 'essay',
+    name: 'Essay',
+    icon: '📝',
+    description: 'Freitext-Aufgabe mit optionaler Musterlösung und Mindestzeichenzahl.',
+    category: 'Quiz',
+    fields: [
+      { key: 'taskDescription', type: 'textarea', label: 'Aufgabenstellung', required: true },
+      { key: 'sampleSolution', type: 'textarea', label: 'Musterlösung (optional)' },
+      { key: 'minChars', type: 'number', label: 'Mindestanzahl Zeichen', default: 0 },
+      { key: 'inputFieldSize', type: 'number', label: 'Eingabefeld-Höhe (Zeilen)', default: 10 },
+    ],
+  },
   fillInTheBlanks: {
     id: 'fillInTheBlanks',
     name: 'Fill in the Blanks',
@@ -287,6 +300,14 @@ const H5P_TYPES = {
       { key: 'autoplay', type: 'checkbox', label: 'Automatisch abspielen', default: false },
       { key: 'loop', type: 'checkbox', label: 'Schleife', default: false },
     ],
+  },
+  h5p_native: {
+    id: 'h5p_native',
+    name: 'H5P Native',
+    icon: '🌐',
+    description: 'Nativ aus einer H5P-Datei importierter Inhalt (Original-H5P-Daten werden unverändert gespeichert).',
+    category: 'Import',
+    fields: [],
   },
 };
 

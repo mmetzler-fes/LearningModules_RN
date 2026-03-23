@@ -35,6 +35,8 @@ const browserApi = {
   importTopic: () => Promise.resolve({ success: false }),
   importModulesToTopic: () => Promise.resolve(null),
   confirmImportModules: () => Promise.resolve({ success: false }),
+  importH5p: () => Promise.resolve({ success: false }),
+  exportTopicAsH5p: () => Promise.resolve({ success: false }),
   getQuizResults: () => Promise.resolve([]),
   deleteQuizResult: () => Promise.resolve({ success: false }),
   deleteAllQuizResults: () => Promise.resolve({ success: false }),
@@ -95,6 +97,7 @@ const typeGrid = document.getElementById('typeGrid');
 const topicsList = document.getElementById('topicsList');
 const btnNewTopic = document.getElementById('btnNewTopic');
 const btnImportTopic = document.getElementById('btnImportTopic');
+const btnImportH5p = document.getElementById('btnImportH5p');
 const topicFormContainer = document.getElementById('topicFormContainer');
 const topicForm = document.getElementById('topicForm');
 const topicFormTitle = document.getElementById('topicFormTitle');
@@ -399,7 +402,8 @@ async function refreshTopicsList() {
           </label>
           <button class="btn btn-primary btn-sm btn-open-topic" data-topic-id="${topic.id}" title="Module verwalten">📦 Module</button>
           <button class="btn btn-secondary btn-sm btn-edit-topic" data-topic-id="${topic.id}" title="Bearbeiten">✏️</button>
-          <button class="btn btn-secondary btn-sm btn-export-topic" data-topic-id="${topic.id}" title="Exportieren">📤</button>
+          <button class="btn btn-secondary btn-sm btn-export-topic" data-topic-id="${topic.id}" title="Als JSON exportieren">📤</button>
+          <button class="btn btn-secondary btn-sm btn-export-h5p-topic" data-topic-id="${topic.id}" title="Als H5P exportieren">📦 H5P</button>
           <button class="btn btn-danger btn-sm btn-delete-topic" data-topic-id="${topic.id}" title="Löschen">🗑</button>
         </div>
       </div>
@@ -422,10 +426,20 @@ async function refreshTopicsList() {
       openTopicEditor(topic);
     });
 
-    // Export topic
+    // Export topic (JSON)
     card.querySelector('.btn-export-topic').addEventListener('click', async () => {
       const result = await appApi.exportTopic(topic.id);
       if (result.success) showToast(t('topics.exported'), 'success');
+    });
+
+    // Export topic as H5P
+    card.querySelector('.btn-export-h5p-topic').addEventListener('click', async () => {
+      const result = await appApi.exportTopicAsH5p(topic.id);
+      if (result.success) {
+        showToast(`📦 H5P exportiert!`, 'success');
+      } else if (result.error) {
+        showToast('❌ H5P-Export fehlgeschlagen: ' + result.error, 'error');
+      }
     });
 
     // Delete topic
@@ -455,6 +469,16 @@ btnImportTopic.addEventListener('click', async () => {
     refreshTopicsList();
   } else if (result.error) {
     showToast(t('topics.import.error') + result.error, 'error');
+  }
+});
+
+btnImportH5p.addEventListener('click', async () => {
+  const result = await appApi.importH5p();
+  if (result.success) {
+    showToast(`🎉 H5P "${result.topicTitle}" importiert — ${result.importedCount} Modul(e) angelegt!`, 'success');
+    refreshTopicsList();
+  } else if (result.error) {
+    showToast('❌ H5P-Import fehlgeschlagen: ' + result.error, 'error');
   }
 });
 
@@ -1106,6 +1130,16 @@ function collectQuizAnswer(mod) {
       result.isCorrect = correct === inputs.length && inputs.length > 0;
       break;
     }
+    case 'essay': {
+      const textarea = quizModuleContainer.querySelector('#essayAnswer');
+      const text = textarea ? textarea.value.trim() : '';
+      const minChars = Number(content.minChars) || 0;
+      result.userAnswer = text || '—';
+      result.correctAnswer = content.sampleSolution || 'Freitextantwort';
+      result.isCorrect = minChars <= 0 ? text.length > 0 : text.length >= minChars;
+      result.score = `${text.length} Zeichen`;
+      break;
+    }
     case 'arithmeticQuiz': {
       const resultEl = quizModuleContainer.querySelector('.quiz-area h3');
       if (resultEl) {
@@ -1726,6 +1760,39 @@ function createTypePreview(type, content) {
       });
       break;
     }
+    case 'essay': {
+      const minChars = Number(content.minChars) || 0;
+      const rows = Number(content.inputFieldSize) || 10;
+      div.innerHTML = `<div style="padding:20px; background:var(--bg-primary); border-radius:var(--radius-md);">
+        ${content.taskDescription ? `<p style="margin-bottom:16px;">${escapeHtml(content.taskDescription)}</p>` : ''}
+        <textarea id="essayAnswer" rows="${rows}" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); resize:vertical;"></textarea>
+        <div style="display:flex; align-items:center; gap:12px; margin-top:12px; flex-wrap:wrap;">
+          <button class="btn btn-primary btn-sm" id="essayCheck">Überprüfen</button>
+          ${minChars > 0 ? `<span style="font-size:0.85rem; color:var(--text-secondary);">Min. ${minChars} Zeichen</span>` : ''}
+          <span id="essayCounter" style="font-size:0.85rem; color:var(--text-secondary);">0 Zeichen</span>
+        </div>
+        <div id="essayFeedback" style="margin-top:12px;"></div>
+        ${content.sampleSolution ? `<details style="margin-top:12px;"><summary style="cursor:pointer;">Musterlösung anzeigen</summary><div style="margin-top:8px; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); white-space:pre-wrap;">${escapeHtml(content.sampleSolution)}</div></details>` : ''}
+      </div>`;
+
+      const essayInput = div.querySelector('#essayAnswer');
+      const essayCounter = div.querySelector('#essayCounter');
+      const essayFeedback = div.querySelector('#essayFeedback');
+      const updateCounter = () => {
+        const len = (essayInput.value || '').trim().length;
+        essayCounter.textContent = `${len} Zeichen`;
+      };
+      essayInput.addEventListener('input', updateCounter);
+      div.querySelector('#essayCheck').addEventListener('click', () => {
+        const len = (essayInput.value || '').trim().length;
+        const ok = minChars <= 0 ? len > 0 : len >= minChars;
+        essayInput.style.borderColor = ok ? 'green' : 'red';
+        essayFeedback.innerHTML = ok
+          ? '<span style="color:green; font-weight:600;">✓ Antwort erfasst.</span>'
+          : `<span style="color:red; font-weight:600;">✗ Bitte mindestens ${minChars} Zeichen eingeben.</span>`;
+      });
+      break;
+    }
     case 'dragTheWords': {
       div.innerHTML = `<div class="dtw-container">
         ${content.taskDescription ? `<p class="dtw-description">${escapeHtml(content.taskDescription)}</p>` : ''}
@@ -2164,6 +2231,76 @@ function createTypePreview(type, content) {
         <h3>${escapeHtml(content.title || 'Video')}</h3>
         <p style="margin-top:8px; color:var(--text-secondary);">Quelle: ${escapeHtml(content.videoUrl || 'Nicht definiert')}</p>
       </div>`;
+      break;
+    }
+    case 'h5p_native': {
+      const H5P_LIB_NAMES = {
+        'H5P.MultiChoice':         { name: 'Multiple Choice',     icon: '🔘' },
+        'H5P.Blanks':              { name: 'Fill in the Blanks',   icon: '✏️' },
+        'H5P.DragQuestion':        { name: 'Drag and Drop',        icon: '🎯' },
+        'H5P.TrueFalse':           { name: 'Wahr / Falsch',        icon: '✅' },
+        'H5P.Essay':               { name: 'Essay',                icon: '📝' },
+        'H5P.MarkTheWords':        { name: 'Wörter markieren',     icon: '🔤' },
+        'H5P.DragText':            { name: 'Text sortieren',       icon: '📘' },
+        'H5P.Summary':             { name: 'Zusammenfassung',      icon: '📋' },
+        'H5P.QuestionSet':         { name: 'Fragen-Set',           icon: '📚' },
+        'H5P.CoursePresentation':  { name: 'Präsentation',         icon: '📊' },
+        'H5P.InteractiveVideo':    { name: 'Interaktives Video',   icon: '🎬' },
+        'H5P.Flashcards':          { name: 'Lernkarten',           icon: '🃏' },
+        'H5P.Accordion':           { name: 'Accordion',            icon: '📂' },
+        'H5P.ImageHotspots':       { name: 'Bild-Hotspots',        icon: '🗺️' },
+        'H5P.AdvancedText':        { name: 'Text',                 icon: '📄' },
+        'H5P.Image':               { name: 'Bild',                 icon: '🖼️' },
+      };
+      const machineName = content.machineName || (content.library || '').split(' ')[0];
+      const libInfo = H5P_LIB_NAMES[machineName] || { name: machineName.replace('H5P.', '') || 'H5P-Inhalt', icon: '🌐' };
+      const params = content.params || {};
+
+      // Extract question text based on library type
+      let questionHtml = '';
+      let extraInfo = '';
+      if (machineName === 'H5P.MultiChoice') {
+        questionHtml = params.question || '';
+        const answers = params.answers || [];
+        const correctCount = answers.filter(a => a.correct).length;
+        extraInfo = `${answers.length} Antwortmöglichkeit(en), ${correctCount} korrekt`;
+      } else if (machineName === 'H5P.Blanks') {
+        questionHtml = params.text || (Array.isArray(params.questions) ? params.questions[0] || '' : '');
+        const blanksMatch = (questionHtml.match(/\*[^*]+\*/g) || []);
+        extraInfo = `${blanksMatch.length} Lücke(n)`;
+      } else if (machineName === 'H5P.TrueFalse') {
+        questionHtml = params.question || '';
+        extraInfo = `Richtige Antwort: ${params.correct === 'true' ? 'Wahr' : 'Falsch'}`;
+      } else if (machineName === 'H5P.Essay') {
+        questionHtml = params.question || params.taskDescription || '';
+      } else if (machineName === 'H5P.DragQuestion') {
+        questionHtml = params.question && params.question.settings && params.question.settings.questionTitle || params.taskDescription || '';
+        const elements = (params.question && params.question.task && params.question.task.elements) || [];
+        const zones = (params.question && params.question.task && params.question.task.dropZones) || [];
+        extraInfo = `${elements.length} Element(e), ${zones.length} Zielzone(n)`;
+      } else if (machineName === 'H5P.MarkTheWords') {
+        questionHtml = params.taskDescription || '';
+      } else if (machineName === 'H5P.DragText') {
+        questionHtml = params.taskDescription || '';
+      }
+
+      const sanitizedQuestion = questionHtml
+        ? `<div class="h5p-native-question">${questionHtml}</div>`
+        : '';
+
+      div.innerHTML = `
+        <div class="h5p-native-preview">
+          <div class="h5p-native-header">
+            <span class="h5p-native-icon">${libInfo.icon}</span>
+            <div class="h5p-native-meta">
+              <span class="h5p-native-type-label">${escapeHtml(libInfo.name)}</span>
+              <span class="h5p-native-lib-label">${escapeHtml(content.library || '')}</span>
+            </div>
+          </div>
+          ${sanitizedQuestion}
+          ${extraInfo ? `<p class="h5p-native-extra">${escapeHtml(extraInfo)}</p>` : ''}
+          <p class="h5p-native-note">⚠️ Nativer H5P-Inhalt — Vorschau zeigt Rohdaten. Für vollständige Wiedergabe H5P exportieren und in einem H5P-fähigen System öffnen.</p>
+        </div>`;
       break;
     }
     default: {

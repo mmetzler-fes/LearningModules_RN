@@ -24,6 +24,10 @@ contextBridge.exposeInMainWorld('api', {
   importModulesToTopic: (topicId) => ipcRenderer.invoke('import-modules-to-topic', topicId),
   confirmImportModules: (topicId, modules) => ipcRenderer.invoke('confirm-import-modules', topicId, modules),
 
+  // H5P import/export
+  importH5p: () => ipcRenderer.invoke('import-h5p'),
+  exportTopicAsH5p: (topicId) => ipcRenderer.invoke('export-topic-as-h5p', topicId),
+
   // Student selections
   getSelectedTopics: () => ipcRenderer.invoke('get-selected-topics'),
   getStudentSelections: (username) => ipcRenderer.invoke('get-student-selections', username),

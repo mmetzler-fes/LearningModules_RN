@@ -24,8 +24,22 @@ class ContentEditorManager {
 
     this.currentType = typeId;
     this.listCounters = {};
+    this._h5pNativeData = null;
     this.container.innerHTML = '';
     this.container.classList.add('active');
+
+    // h5p_native: read-only editor — preserve raw content, show info only
+    if (typeId === 'h5p_native') {
+      this._h5pNativeData = existingData;
+      const heading = document.createElement('h4');
+      heading.textContent = `${typeDef.icon} ${typeDef.name} — Inhalt konfigurieren`;
+      this.container.appendChild(heading);
+      const info = document.createElement('p');
+      info.style.cssText = 'color:var(--text-secondary);font-size:0.88rem;margin:8px 0;';
+      info.textContent = `H5P-Bibliothek: ${existingData.library || '—'}. Der Inhalt wird im Original gespeichert und nicht bearbeitet.`;
+      this.container.appendChild(info);
+      return;
+    }
 
     // Special visual editor for Drag and Drop
     if (typeDef.editorType === 'dragAndDrop') {
@@ -368,6 +382,11 @@ class ContentEditorManager {
    */
   collectData() {
     if (!this.currentType) return {};
+
+    // h5p_native: return the original content unchanged
+    if (this.currentType === 'h5p_native') {
+      return this._h5pNativeData || {};
+    }
 
     // Special handling for Drag and Drop visual editor
     if (this.dndState) {
@@ -990,6 +1009,7 @@ class ContentEditorManager {
       this._dndKeyHandler = null;
     }
     this.dndState = null;
+    this._h5pNativeData = null;
     this.container.innerHTML = '';
     this.container.classList.remove('active');
     this.currentType = null;

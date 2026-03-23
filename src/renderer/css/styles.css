@@ -2199,3 +2199,66 @@ body {
   color: var(--text-secondary);
   font-size: 1.1rem;
 }
+
+/* ===== H5P Native Preview ===== */
+.h5p-native-preview {
+  padding: 20px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.h5p-native-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.h5p-native-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+.h5p-native-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.h5p-native-type-label {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.h5p-native-lib-label {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  font-family: monospace;
+}
+
+.h5p-native-question {
+  margin-bottom: 12px;
+  line-height: 1.6;
+  font-size: 0.95rem;
+}
+
+.h5p-native-extra {
+  font-size: 0.85rem;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+
+.h5p-native-note {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-style: italic;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--accent);
+}
