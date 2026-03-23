@@ -56,6 +56,7 @@ let currentUser = null; // { name, role: 'teacher'|'student' }
 let topics = [];
 let currentTopicId = null;
 let currentTopicModules = [];
+let currentTopicRawSummary = null;
 let editingModuleId = null;
 let editingTopicId = null;
 let contentEditor = null;
@@ -382,7 +383,10 @@ async function refreshTopicsList() {
   }
 
   for (const topic of topics) {
-    const moduleCount = (topic.modules || []).length;
+    const isRawTopic = topic.h5pImportMode === 'raw';
+    const moduleCount = isRawTopic
+      ? (topic.h5pRawSummary && topic.h5pRawSummary.itemCount) || 0
+      : (topic.modules || []).length;
     const card = document.createElement('div');
     card.className = `topic-card ${topic.selected ? 'topic-active' : 'topic-inactive'}`;
     card.innerHTML = `
@@ -392,6 +396,7 @@ async function refreshTopicsList() {
           <p class="topic-card-desc">${escapeHtml(topic.description || '')}</p>
           <div class="topic-card-meta">
             <span class="topic-module-count">${moduleCount} Module</span>
+            ${isRawTopic ? '<span class="topic-status" style="background:#eef2ff; color:#3730a3;">RAW H5P</span>' : ''}
             <span class="topic-status ${topic.selected ? 'active' : 'inactive'}">${topic.selected ? '✅ Aktiv' : '❌ Inaktiv'}</span>
           </div>
         </div>
@@ -454,6 +459,18 @@ async function refreshTopicsList() {
   }
 }
 
+function updateModulesToolbarForTopicMode() {
+  const isRaw = !!currentTopicRawSummary;
+  if (btnCreateModule) {
+    btnCreateModule.disabled = isRaw;
+    btnCreateModule.title = isRaw ? 'Bei RAW-H5P Projekten ist die Modulbearbeitung deaktiviert.' : '';
+  }
+  if (btnImportModules) {
+    btnImportModules.disabled = isRaw;
+    btnImportModules.title = isRaw ? 'Bei RAW-H5P Projekten ist der Modulimport deaktiviert.' : '';
+  }
+}
+
 btnNewTopic.addEventListener('click', () => {
   editingTopicId = null;
   topicFormTitle.textContent = t('topics.form.new');
@@ -473,7 +490,7 @@ btnImportTopic.addEventListener('click', async () => {
 });
 
 btnImportH5p.addEventListener('click', async () => {
-  const result = await appApi.importH5p();
+  const result = await appApi.importH5p({ importMode: 'native' });
   if (result.success) {
     showToast(`🎉 H5P "${result.topicTitle}" importiert — ${result.importedCount} Modul(e) angelegt!`, 'success');
     refreshTopicsList();
@@ -521,19 +538,73 @@ function openTopicModules(topicId) {
   currentTopicId = topicId;
   const topic = topics.find((t) => t.id === topicId);
   if (!topic) return;
+  currentTopicRawSummary = topic.h5pImportMode === 'raw' ? (topic.h5pRawSummary || null) : null;
   currentTopicName.textContent = topic.title;
   modulesViewTitle.textContent = t('modules.in', { title: topic.title });
+  updateModulesToolbarForTopicMode();
   navigateToView('teacher-modules');
 }
 
 backToTopics.addEventListener('click', () => {
   currentTopicId = null;
+  currentTopicRawSummary = null;
+  updateModulesToolbarForTopicMode();
   navigateToView('teacher-topics');
 });
 
 async function refreshModulesList() {
   if (!currentTopicId) {
     modulesList.innerHTML = '<div class="empty-state"><span class="empty-icon">📂</span><p>Bitte wählen Sie zuerst ein Lernthema.</p></div>';
+    return;
+  }
+
+  const topic = topics.find((t) => t.id === currentTopicId);
+  const rawSummary = topic && topic.h5pImportMode === 'raw' ? (topic.h5pRawSummary || currentTopicRawSummary) : null;
+  currentTopicRawSummary = rawSummary || null;
+  updateModulesToolbarForTopicMode();
+
+  if (rawSummary) {
+    const search = searchModules.value.toLowerCase().trim();
+    let items = Array.isArray(rawSummary.items) ? rawSummary.items : [];
+    if (search) {
+      items = items.filter((item) =>
+        (item.title || '').toLowerCase().includes(search) ||
+        (item.library || '').toLowerCase().includes(search)
+      );
+    }
+
+    modulesList.innerHTML = '';
+    const info = document.createElement('div');
+    info.className = 'empty-state';
+    info.style.marginBottom = '12px';
+    info.innerHTML = `<span class="empty-icon">📦</span><p>RAW-H5P-Projekt: Inhalt wird read-only angezeigt. Für bearbeitbare Module bitte als „native Module“ importieren.</p>`;
+    modulesList.appendChild(info);
+
+    if (items.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.innerHTML = `<span class="empty-icon">🔍</span><p>Keine Inhalte gefunden.</p>`;
+      modulesList.appendChild(empty);
+      return;
+    }
+
+    items.forEach((item, idx) => {
+      const card = document.createElement('div');
+      card.className = 'module-card module-card-disabled';
+      card.innerHTML = `
+        <div class="module-card-icon">📄</div>
+        <div class="module-card-info">
+          <div class="module-card-title">${escapeHtml(item.title || `Inhalt ${idx + 1}`)}</div>
+          <div class="module-card-meta">
+            <span class="module-card-type">${escapeHtml((item.library || '').split(' ')[0] || rawSummary.mainLibrary || 'H5P')}</span>
+          </div>
+        </div>
+        <div class="module-card-actions">
+          <button class="btn btn-secondary btn-sm" disabled title="RAW-Inhalte sind in dieser Ansicht nicht einzeln editierbar">Nur Anzeige</button>
+        </div>
+      `;
+      modulesList.appendChild(card);
+    });
     return;
   }
 

@@ -1,5 +1,17 @@
 # LearningModules v1.0.0
 
+## Nachtrag (2026-03-23)
+
+### H5P Native Import/Export erweitert
+
+- Neuer Workflow in **Lernthemen verwalten**: **H5P importieren** und **H5P exportieren**
+- Import-Filter verbessert: bekannte H5P-Libraries werden als **native Modultypen** übernommen statt pauschal als `h5p_native`
+- Unterstützte Native-Mappings beim Import: `MultiChoice`, `TrueFalse`, `Blanks`, `DragQuestion`, `DragText`, `MarkTheWords`, `Essay`
+- `DragQuestion`-Import verbessert: Hintergrundbild und Drop-Zonen werden korrekt übernommen
+- Export zurück nach H5P erweitert: native Typen werden als echte H5P-Libraries exportiert
+- Neue Export-Mappings: `dragAndDrop`, `multipleChoice`, `trueFalse`, `fillInTheBlanks`, `dragTheWords`, `markTheWords`, `accordion`, `flashcards`, `essay`
+- Smoke-Test-Skript ergänzt: `scripts/h5p-roundtrip-smoke.js`
+
 **Interaktive Lernmodule für den Unterricht** – eine Desktop-App für Lehrkräfte und Schüler:innen, mit der sich vielfältige Übungsformate erstellen, verwalten und im Klassenzimmer per WLAN verteilen lassen.
 
 ---

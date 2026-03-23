@@ -51,9 +51,32 @@ class ContentEditorManager {
     heading.textContent = `${typeDef.icon} ${typeDef.name} — Inhalt konfigurieren`;
     this.container.appendChild(heading);
 
-    for (const field of typeDef.fields) {
+    const normalFields = (typeDef.fields || []).filter((field) => !field.advanced);
+    const advancedFields = (typeDef.fields || []).filter((field) => field.advanced);
+
+    for (const field of normalFields) {
       const value = existingData[field.key];
       this.renderField(this.container, field, value);
+    }
+
+    if (advancedFields.length > 0) {
+      const details = document.createElement('details');
+      details.style.cssText = 'margin-top:12px; border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden;';
+      const summary = document.createElement('summary');
+      summary.textContent = 'Erweiterte Optionen';
+      summary.style.cssText = 'padding:10px 12px; cursor:pointer; font-weight:600; background:var(--bg-primary);';
+      details.appendChild(summary);
+
+      const body = document.createElement('div');
+      body.style.cssText = 'padding:12px; background:var(--bg-secondary);';
+      details.appendChild(body);
+
+      for (const field of advancedFields) {
+        const value = existingData[field.key];
+        this.renderField(body, field, value);
+      }
+
+      this.container.appendChild(details);
     }
   }
 

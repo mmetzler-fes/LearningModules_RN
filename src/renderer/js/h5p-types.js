@@ -165,6 +165,9 @@ const H5P_TYPES = {
       { key: 'taskDescription', type: 'textarea', label: 'Aufgabenbeschreibung' },
       { key: 'textField', type: 'textarea', label: 'Text (ziehbare Wörter mit *Sternchen* markieren)', required: true,
         placeholder: 'Die *Sonne* scheint am *Himmel*.' },
+      { key: 'enableRetry', type: 'checkbox', label: 'Wiederholen erlauben', default: true, advanced: true },
+      { key: 'enableSolutionsButton', type: 'checkbox', label: 'Lösung anzeigen erlauben', default: true, advanced: true },
+      { key: 'instantFeedback', type: 'checkbox', label: 'Sofortiges Feedback', default: false, advanced: true },
     ],
   },
   essay: {
@@ -178,6 +181,9 @@ const H5P_TYPES = {
       { key: 'sampleSolution', type: 'textarea', label: 'Musterlösung (optional)' },
       { key: 'minChars', type: 'number', label: 'Mindestanzahl Zeichen', default: 0 },
       { key: 'inputFieldSize', type: 'number', label: 'Eingabefeld-Höhe (Zeilen)', default: 10 },
+      { key: 'enableRetry', type: 'checkbox', label: 'Wiederholen erlauben', default: true, advanced: true },
+      { key: 'ignoreScoring', type: 'checkbox', label: 'Automatische Bewertung deaktivieren', default: true, advanced: true },
+      { key: 'pointsHost', type: 'number', label: 'Max. Punkte', default: 1, advanced: true },
     ],
   },
   fillInTheBlanks: {
@@ -193,6 +199,9 @@ const H5P_TYPES = {
           placeholder: 'Berlin ist die *Hauptstadt* von Deutschland.' },
       ]},
       { key: 'caseSensitive', type: 'checkbox', label: 'Groß-/Kleinschreibung beachten', default: false },
+      { key: 'enableRetry', type: 'checkbox', label: 'Wiederholen erlauben', default: true, advanced: true },
+      { key: 'enableSolutionsButton', type: 'checkbox', label: 'Lösung anzeigen erlauben', default: true, advanced: true },
+      { key: 'showSolutionsRequiresInput', type: 'checkbox', label: 'Lösung erst nach Eingabe anzeigen', default: true, advanced: true },
     ],
   },
   flashcards: {
@@ -247,6 +256,8 @@ const H5P_TYPES = {
       { key: 'taskDescription', type: 'textarea', label: 'Aufgabenbeschreibung' },
       { key: 'textField', type: 'textarea', label: 'Text (korrekte Wörter mit *Sternchen* markieren)', required: true,
         placeholder: 'Markiere alle *Nomen*: Der *Hund* liegt auf dem *Sofa*.' },
+      { key: 'enableRetry', type: 'checkbox', label: 'Wiederholen erlauben', default: true, advanced: true },
+      { key: 'enableSolutionsButton', type: 'checkbox', label: 'Lösung anzeigen erlauben', default: true, advanced: true },
     ],
   },
   multipleChoice: {
@@ -263,6 +274,10 @@ const H5P_TYPES = {
         { key: 'tip', type: 'text', label: 'Hinweis (optional)' },
       ]},
       { key: 'singleAnswer', type: 'checkbox', label: 'Nur eine Antwort erlaubt', default: true },
+      { key: 'randomAnswers', type: 'checkbox', label: 'Antworten zufällig mischen', default: false, advanced: true },
+      { key: 'enableRetry', type: 'checkbox', label: 'Wiederholen erlauben', default: true, advanced: true },
+      { key: 'enableSolutionsButton', type: 'checkbox', label: 'Lösung anzeigen erlauben', default: true, advanced: true },
+      { key: 'passPercentage', type: 'number', label: 'Bestehensgrenze (%)', default: 100, advanced: true },
     ],
   },
   trueFalse: {
@@ -281,6 +296,8 @@ const H5P_TYPES = {
         { key: 'feedbackCorrect', type: 'text', label: 'Feedback bei richtiger Antwort', default: 'Richtig!' },
         { key: 'feedbackWrong', type: 'text', label: 'Feedback bei falscher Antwort', default: 'Leider falsch.' },
       ]},
+      { key: 'enableRetry', type: 'checkbox', label: 'Wiederholen erlauben', default: true, advanced: true },
+      { key: 'enableSolutionsButton', type: 'checkbox', label: 'Lösung anzeigen erlauben', default: true, advanced: true },
     ],
   },
   video: {
