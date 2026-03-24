@@ -163,6 +163,7 @@ const H5P_TYPES = {
     category: 'Sprache',
     fields: [
       { key: 'taskDescription', type: 'textarea', label: 'Aufgabenbeschreibung' },
+      { key: 'imageUrl', type: 'image', label: 'Bild (optional)' },
       { key: 'textField', type: 'textarea', label: 'Text (ziehbare Wörter mit *Sternchen* markieren)', required: true,
         placeholder: 'Die *Sonne* scheint am *Himmel*.' },
       { key: 'enableRetry', type: 'checkbox', label: 'Wiederholen erlauben', default: true, advanced: true },
@@ -178,6 +179,7 @@ const H5P_TYPES = {
     category: 'Quiz',
     fields: [
       { key: 'taskDescription', type: 'textarea', label: 'Aufgabenstellung', required: true },
+      { key: 'imageUrl', type: 'image', label: 'Bild (optional)' },
       { key: 'sampleSolution', type: 'textarea', label: 'Musterlösung (optional)' },
       { key: 'minChars', type: 'number', label: 'Mindestanzahl Zeichen', default: 0 },
       { key: 'inputFieldSize', type: 'number', label: 'Eingabefeld-Höhe (Zeilen)', default: 10 },
@@ -194,6 +196,7 @@ const H5P_TYPES = {
     category: 'Sprache',
     fields: [
       { key: 'taskDescription', type: 'textarea', label: 'Aufgabenbeschreibung' },
+      { key: 'imageUrl', type: 'image', label: 'Bild (optional)' },
       { key: 'questions', type: 'list', label: 'Sätze mit Lücken', itemFields: [
         { key: 'text', type: 'text', label: 'Satz (Lücken mit *Antwort* markieren)', required: true,
           placeholder: 'Berlin ist die *Hauptstadt* von Deutschland.' },
@@ -254,6 +257,7 @@ const H5P_TYPES = {
     category: 'Sprache',
     fields: [
       { key: 'taskDescription', type: 'textarea', label: 'Aufgabenbeschreibung' },
+      { key: 'imageUrl', type: 'image', label: 'Bild (optional)' },
       { key: 'textField', type: 'textarea', label: 'Text (korrekte Wörter mit *Sternchen* markieren)', required: true,
         placeholder: 'Markiere alle *Nomen*: Der *Hund* liegt auf dem *Sofa*.' },
       { key: 'enableRetry', type: 'checkbox', label: 'Wiederholen erlauben', default: true, advanced: true },
@@ -268,6 +272,7 @@ const H5P_TYPES = {
     category: 'Quiz',
     fields: [
       { key: 'question', type: 'textarea', label: 'Frage', required: true },
+      { key: 'imageUrl', type: 'image', label: 'Bild (optional)' },
       { key: 'answers', type: 'list', label: 'Antworten', itemFields: [
         { key: 'text', type: 'text', label: 'Antworttext', required: true },
         { key: 'correct', type: 'checkbox', label: 'Korrekt' },
@@ -287,6 +292,7 @@ const H5P_TYPES = {
     description: 'Wahr/Falsch-Fragen.',
     category: 'Quiz',
     fields: [
+      { key: 'imageUrl', type: 'image', label: 'Bild (optional)' },
       { key: 'questions', type: 'list', label: 'Fragen', itemFields: [
         { key: 'question', type: 'textarea', label: 'Frage', required: true },
         { key: 'correctAnswer', type: 'select', label: 'Korrekte Antwort', options: [

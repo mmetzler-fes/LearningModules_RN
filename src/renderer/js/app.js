@@ -1476,6 +1476,21 @@ function renderH5pPreview(mod, typeDef, container) {
   container.appendChild(wrapper);
 }
 
+function renderModuleImage(content, options = {}) {
+  if (!content || !content.imageUrl) return '';
+  const marginBottom = options.marginBottom || '16px';
+
+  return `
+    <div style="margin-bottom:${marginBottom};">
+      <img
+        src="${content.imageUrl}"
+        alt="Modulbild"
+        style="display:block; max-width:100%; max-height:320px; object-fit:contain; border-radius:var(--radius-md); border:1px solid var(--border); background:var(--bg-primary);"
+      />
+    </div>
+  `;
+}
+
 function createTypePreview(type, content) {
   const div = document.createElement('div');
 
@@ -1515,6 +1530,7 @@ function createTypePreview(type, content) {
       const q = content.question || 'Keine Frage definiert';
       const answers = content.answers || [];
       div.innerHTML = `<div style="padding:20px; background:var(--bg-primary); border-radius:var(--radius-md);">
+        ${renderModuleImage(content)}
         <p style="font-weight:600; margin-bottom:16px;">${escapeHtml(q)}</p>
         <div class="mc-answers"></div>
         <button class="btn btn-primary btn-sm" style="margin-top:16px;" id="mcCheck">Überprüfen</button>
@@ -1562,6 +1578,7 @@ function createTypePreview(type, content) {
         <div class="tf-player">
           <div class="tf-progress"><span id="tfProgress">Frage 1 von ${tfQuestions.length}</span></div>
           <div class="tf-card">
+            ${renderModuleImage(content, { marginBottom: '20px' })}
             <p id="tfQuestion" class="tf-question"></p>
             <div class="tf-buttons">
               <button class="btn btn-secondary tf-btn" id="tfTrue" data-val="true">Wahr</button>
@@ -1868,6 +1885,7 @@ function createTypePreview(type, content) {
       const questions = content.questions || [];
       div.innerHTML = `<div style="padding:20px; background:var(--bg-primary); border-radius:var(--radius-md);">
         ${content.taskDescription ? `<p style="margin-bottom:16px;">${escapeHtml(content.taskDescription)}</p>` : ''}
+        ${renderModuleImage(content)}
         <div id="blanksArea"></div>
         <button class="btn btn-primary btn-sm" style="margin-top:16px;" id="blanksCheck">Überprüfen</button>
         <div id="blanksFeedback" style="margin-top:12px;"></div>
@@ -1911,6 +1929,7 @@ function createTypePreview(type, content) {
       const rows = Number(content.inputFieldSize) || 10;
       div.innerHTML = `<div style="padding:20px; background:var(--bg-primary); border-radius:var(--radius-md);">
         ${content.taskDescription ? `<p style="margin-bottom:16px;">${escapeHtml(content.taskDescription)}</p>` : ''}
+        ${renderModuleImage(content)}
         <textarea id="essayAnswer" rows="${rows}" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); resize:vertical;"></textarea>
         <div style="display:flex; align-items:center; gap:12px; margin-top:12px; flex-wrap:wrap;">
           <button class="btn btn-primary btn-sm" id="essayCheck">Überprüfen</button>
@@ -1942,6 +1961,7 @@ function createTypePreview(type, content) {
     case 'dragTheWords': {
       div.innerHTML = `<div class="dtw-container">
         ${content.taskDescription ? `<p class="dtw-description">${escapeHtml(content.taskDescription)}</p>` : ''}
+        ${renderModuleImage(content)}
         <div class="dtw-text-area" id="dtwTextArea"></div>
         <div class="dtw-word-bank" id="dtwWordBank"></div>
         <button class="btn btn-primary btn-sm" style="margin-top:16px;" id="dtwCheck">Überprüfen</button>
@@ -2081,6 +2101,7 @@ function createTypePreview(type, content) {
     case 'markTheWords': {
       div.innerHTML = `<div style="padding:20px; background:var(--bg-primary); border-radius:var(--radius-md);">
         ${content.taskDescription ? `<p style="margin-bottom:16px;">${escapeHtml(content.taskDescription)}</p>` : ''}
+        ${renderModuleImage(content)}
         <div id="wordsArea" style="line-height:2.2;"></div>
         <button class="btn btn-primary btn-sm" style="margin-top:16px;" id="wordsCheck">Überprüfen</button>
         <div id="wordsFeedback" style="margin-top:12px;"></div>

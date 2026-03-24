@@ -233,6 +233,46 @@ function inferImageExtFromDataUrl(dataUrl) {
   return { mime, ext: byMime[mime] || 'png' };
 }
 
+function resolveTopicImage(imageUrl, topicImages, prefix) {
+  if (!imageUrl) return { image: null, addedImages: {} };
+
+  if (imageUrl.startsWith('data:image/')) {
+    const { mime, ext } = inferImageExtFromDataUrl(imageUrl);
+    const fileName = `${prefix}-${h5pUuid()}.${ext}`;
+    return {
+      image: {
+        path: `images/${fileName}`,
+        mime,
+        copyright: { license: 'U' },
+      },
+      addedImages: { [fileName]: imageUrl },
+    };
+  }
+
+  const fileName = path.basename(imageUrl);
+  if (topicImages[fileName]) {
+    const { mime } = inferImageExtFromDataUrl(topicImages[fileName]);
+    return {
+      image: {
+        path: `images/${fileName}`,
+        mime,
+        copyright: { license: 'U' },
+      },
+      addedImages: {},
+    };
+  }
+
+  return { image: null, addedImages: {} };
+}
+
+function extractMediaImage(media, h5pImages) {
+  if (!media || typeof media !== 'object') return '';
+  const imagePath = media.path || (media.params && media.params.file && media.params.file.path) || '';
+  if (!imagePath) return '';
+  const fileName = path.basename(imagePath);
+  return h5pImages[fileName] || '';
+}
+
 function deepMergeObjects(base, patch) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return patch;
   const out = (base && typeof base === 'object' && !Array.isArray(base)) ? { ...base } : {};
@@ -413,12 +453,15 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
   if (mod.type === 'multipleChoice') {
     const content = mod.content || {};
     const answers = Array.isArray(content.answers) ? content.answers : [];
+    const { image, addedImages } = resolveTopicImage(content.imageUrl || '', topicImages, `mc-${mod.id || 'module'}`);
 
     return {
       question: buildQuestionWithSource(mod, 'H5P.MultiChoice', {
         library: 'H5P.MultiChoice 1.16',
         params: {
-          media: { disableImageZooming: false },
+          media: image
+            ? { type: { library: 'H5P.Image 1.1', params: { file: image } }, disableImageZooming: false }
+            : { disableImageZooming: false },
           question: `<p>${escapeHtmlForH5p(content.question || '')}</p>`,
           answers: answers.map((answer) => ({
             correct: !!answer.correct,
@@ -466,7 +509,7 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
         },
         subContentId: h5pUuid(),
       }),
-      addedImages: {},
+      addedImages,
     };
   }
 
@@ -475,12 +518,15 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
     const firstQuestion = Array.isArray(content.questions) && content.questions.length > 0
       ? content.questions[0]
       : {};
+    const { image, addedImages } = resolveTopicImage(content.imageUrl || '', topicImages, `tf-${mod.id || 'module'}`);
 
     return {
       question: buildQuestionWithSource(mod, 'H5P.TrueFalse', {
         library: 'H5P.TrueFalse 1.8',
         params: {
-          media: { disableImageZooming: false },
+          media: image
+            ? { type: { library: 'H5P.Image 1.1', params: { file: image } }, disableImageZooming: false }
+            : { disableImageZooming: false },
           question: `<p>${escapeHtmlForH5p(firstQuestion.question || '')}</p>`,
           correct: (firstQuestion.correctAnswer || 'false') === 'true',
           l10n: {
@@ -520,19 +566,22 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
         },
         subContentId: h5pUuid(),
       }),
-      addedImages: {},
+      addedImages,
     };
   }
 
   if (mod.type === 'fillInTheBlanks') {
     const content = mod.content || {};
     const questions = Array.isArray(content.questions) ? content.questions : [];
+    const { image, addedImages } = resolveTopicImage(content.imageUrl || '', topicImages, `fib-${mod.id || 'module'}`);
 
     return {
       question: buildQuestionWithSource(mod, 'H5P.Blanks', {
         library: 'H5P.Blanks 1.14',
         params: {
-          media: { disableImageZooming: false },
+          media: image
+            ? { type: { library: 'H5P.Image 1.1', params: { file: image } }, disableImageZooming: false }
+            : { disableImageZooming: false },
           text: content.taskDescription ? `<p>${escapeHtmlForH5p(content.taskDescription)}</p>` : '',
           questions: questions.map((q) => `<p>${escapeHtmlForH5p(q.text || '')}</p>`),
           behaviour: {
@@ -583,17 +632,19 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
         },
         subContentId: h5pUuid(),
       }),
-      addedImages: {},
+      addedImages,
     };
   }
 
   if (mod.type === 'dragTheWords') {
     const content = mod.content || {};
+    const { image, addedImages } = resolveTopicImage(content.imageUrl || '', topicImages, `dtw-${mod.id || 'module'}`);
 
     return {
       question: buildQuestionWithSource(mod, 'H5P.DragText', {
         library: 'H5P.DragText 1.10',
         params: {
+          ...(image ? { media: { type: { library: 'H5P.Image 1.1', params: { file: image } }, disableImageZooming: false } } : {}),
           taskDescription: content.taskDescription ? `<p>${escapeHtmlForH5p(content.taskDescription)}</p>` : '',
           textField: content.textField || '',
           overallFeedback: [{ from: 0, to: 100, feedback: '' }],
@@ -617,17 +668,19 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
         },
         subContentId: h5pUuid(),
       }),
-      addedImages: {},
+      addedImages,
     };
   }
 
   if (mod.type === 'markTheWords') {
     const content = mod.content || {};
+    const { image, addedImages } = resolveTopicImage(content.imageUrl || '', topicImages, `mtw-${mod.id || 'module'}`);
 
     return {
       question: buildQuestionWithSource(mod, 'H5P.MarkTheWords', {
         library: 'H5P.MarkTheWords 1.11',
         params: {
+          ...(image ? { media: { type: { library: 'H5P.Image 1.1', params: { file: image } }, disableImageZooming: false } } : {}),
           taskDescription: content.taskDescription ? `<p>${escapeHtmlForH5p(content.taskDescription)}</p>` : '',
           textField: content.textField || '',
           overallFeedback: [{ from: 0, to: 100, feedback: '' }],
@@ -651,7 +704,7 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
         },
         subContentId: h5pUuid(),
       }),
-      addedImages: {},
+      addedImages,
     };
   }
 
@@ -758,12 +811,15 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
 
   if (mod.type === 'essay') {
     const content = mod.content || {};
+    const { image, addedImages } = resolveTopicImage(content.imageUrl || '', topicImages, `essay-${mod.id || 'module'}`);
 
     return {
       question: buildQuestionWithSource(mod, 'H5P.Essay', {
         library: 'H5P.Essay 1.5',
         params: {
-          media: { disableImageZooming: false },
+          media: image
+            ? { type: { library: 'H5P.Image 1.1', params: { file: image } }, disableImageZooming: false }
+            : { disableImageZooming: false },
           question: content.taskDescription ? `<p>${escapeHtmlForH5p(content.taskDescription)}</p>` : '',
           solution: {
             introduction: '',
@@ -795,7 +851,7 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
         },
         subContentId: h5pUuid(),
       }),
-      addedImages: {},
+      addedImages,
     };
   }
 
@@ -825,6 +881,7 @@ function convertH5pToNative(machineName, params, h5pImages = {}) {
         type: 'multipleChoice',
         content: {
           question,
+          imageUrl: extractMediaImage(params.media, h5pImages),
           answers,
           singleAnswer,
           randomAnswers: !!behaviour.randomAnswers,
@@ -844,6 +901,7 @@ function convertH5pToNative(machineName, params, h5pImages = {}) {
         type: 'fillInTheBlanks',
         content: {
           taskDescription,
+          imageUrl: extractMediaImage(params.media, h5pImages),
           questions: questions.length > 0 ? questions : [{ text: '' }],
           caseSensitive: !!(params.behaviour && params.behaviour.caseSensitive),
           enableRetry: !(params.behaviour && params.behaviour.enableRetry === false),
@@ -861,6 +919,7 @@ function convertH5pToNative(machineName, params, h5pImages = {}) {
       return {
         type: 'trueFalse',
         content: {
+          imageUrl: extractMediaImage(params.media, h5pImages),
           questions: [{ question, correctAnswer, feedbackCorrect, feedbackWrong }],
           enableRetry: !(params.behaviour && params.behaviour.enableRetry === false),
           enableSolutionsButton: !(params.behaviour && params.behaviour.enableSolutionsButton === false),
@@ -873,6 +932,7 @@ function convertH5pToNative(machineName, params, h5pImages = {}) {
         type: 'essay',
         content: {
           taskDescription: stripHtml(params.question || params.taskDescription || ''),
+          imageUrl: extractMediaImage(params.media, h5pImages),
           sampleSolution: (params.solution && params.solution.sample) || '',
           minChars: Number(params.behaviour && params.behaviour.minimumLength) || 0,
           inputFieldSize: Number(params.behaviour && params.behaviour.inputFieldSize) || 10,
@@ -888,6 +948,7 @@ function convertH5pToNative(machineName, params, h5pImages = {}) {
         type: 'dragTheWords',
         content: {
           taskDescription: stripHtml(params.taskDescription || ''),
+          imageUrl: extractMediaImage(params.media, h5pImages),
           textField: params.textField || '',
           enableRetry: !(params.behaviour && params.behaviour.enableRetry === false),
           enableSolutionsButton: !(params.behaviour && params.behaviour.enableSolutionsButton === false),
@@ -901,6 +962,7 @@ function convertH5pToNative(machineName, params, h5pImages = {}) {
         type: 'markTheWords',
         content: {
           taskDescription: stripHtml(params.taskDescription || ''),
+          imageUrl: extractMediaImage(params.media, h5pImages),
           textField: params.textField || '',
           enableRetry: !(params.behaviour && params.behaviour.enableRetry === false),
           enableSolutionsButton: !(params.behaviour && params.behaviour.enableSolutionsButton === false),
