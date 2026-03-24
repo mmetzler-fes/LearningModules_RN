@@ -1779,6 +1779,103 @@ ipcMain.handle('export-topic-as-h5p', async (_event, topicId) => {
   }
 });
 
+// --- IPC: Export selected modules individually as H5P ---
+
+ipcMain.handle('export-selected-modules-as-h5p', async (_event, topicId) => {
+  const db = loadDB();
+  const topic = db.topics.find((t) => t.id === topicId);
+  if (!topic) return { success: false, error: 'Thema nicht gefunden' };
+
+  if (topic.h5pImportMode === 'raw') {
+    return { success: false, error: 'RAW H5P-Projekte können nicht als einzelne Module exportiert werden.' };
+  }
+
+  const selectedModules = (topic.modules || []).filter((m) => m.moduleSelected !== false);
+  if (selectedModules.length === 0) {
+    return { success: false, error: 'Keine aktiven Module zum Exportieren vorhanden.' };
+  }
+
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: `H5P-Export: ${selectedModules.length} Modul(e) exportieren`,
+    properties: ['openDirectory', 'createDirectory'],
+    buttonLabel: 'Ordner wählen',
+  });
+  if (canceled || !filePaths || !filePaths[0]) return { success: false };
+
+  const exportDir = filePaths[0];
+  let exported = 0;
+  const errors = [];
+  const usedNames = new Set();
+
+  for (const mod of selectedModules) {
+    try {
+      const converted = convertNativeModuleToH5pQuestion(mod, topic.h5pImages || {});
+      if (!converted) {
+        errors.push(`"${mod.title}": Konvertierung fehlgeschlagen`);
+        continue;
+      }
+
+      const { question, addedImages } = converted;
+      const libraryStr = question.library || 'H5P.AdvancedText 1.1';
+      const parts = libraryStr.split(' ');
+      const machineName = parts[0];
+      const versionStr = parts[1] || '1.0';
+      const [majorStr, minorStr] = versionStr.split('.');
+      const majorVersion = parseInt(majorStr, 10) || 1;
+      const minorVersion = parseInt(minorStr, 10) || 0;
+
+      const h5pJson = {
+        embedTypes: ['iframe'],
+        language: 'de',
+        title: mod.title,
+        mainLibrary: machineName,
+        license: 'U',
+        defaultLanguage: 'de',
+        preloadedDependencies: [{ machineName, majorVersion, minorVersion }],
+        extraTitle: mod.title,
+      };
+
+      const contentJson = question.params || {};
+
+      // Unique, safe file name
+      let baseName = (mod.title || 'modul').replace(/[^\w\säöüÄÖÜß-]/g, '_').trim() || 'modul';
+      let fileName = `${baseName}.h5p`;
+      let counter = 1;
+      while (usedNames.has(fileName.toLowerCase())) {
+        fileName = `${baseName}_${counter++}.h5p`;
+      }
+      usedNames.add(fileName.toLowerCase());
+
+      const filePath = path.join(exportDir, fileName);
+      const zipFiles = {
+        'h5p.json':              Buffer.from(JSON.stringify(h5pJson,    null, 2), 'utf8'),
+        'content/content.json':  Buffer.from(JSON.stringify(contentJson, null, 2), 'utf8'),
+      };
+
+      const allImages = { ...(topic.h5pImages || {}), ...(addedImages || {}) };
+      for (const [imgName, dataUrl] of Object.entries(allImages)) {
+        if (!dataUrl) continue;
+        const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+        if (b64) zipFiles[`content/images/${imgName}`] = Buffer.from(b64, 'base64');
+      }
+
+      fs.writeFileSync(filePath, createZip(zipFiles));
+      exported++;
+    } catch (e) {
+      errors.push(`"${mod.title}": ${e.message}`);
+    }
+  }
+
+  return {
+    success: exported > 0,
+    exported,
+    total: selectedModules.length,
+    exportDir,
+    errors: errors.length > 0 ? errors : undefined,
+    error: exported === 0 ? (errors[0] || 'Keine Module exportiert.') : undefined,
+  };
+});
+
 // --- App lifecycle ---
 
 app.whenReady().then(() => {

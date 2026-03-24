@@ -37,6 +37,7 @@ const browserApi = {
   confirmImportModules: () => Promise.resolve({ success: false }),
   importH5p: () => Promise.resolve({ success: false }),
   exportTopicAsH5p: () => Promise.resolve({ success: false }),
+  exportSelectedModulesAsH5p: () => Promise.resolve({ success: false }),
   getQuizResults: () => Promise.resolve([]),
   deleteQuizResult: () => Promise.resolve({ success: false }),
   deleteAllQuizResults: () => Promise.resolve({ success: false }),
@@ -99,6 +100,10 @@ const topicsList = document.getElementById('topicsList');
 const btnNewTopic = document.getElementById('btnNewTopic');
 const btnImportTopic = document.getElementById('btnImportTopic');
 const btnImportH5p = document.getElementById('btnImportH5p');
+const btnExportH5p = document.getElementById('btnExportH5p');
+const exportH5pTopicOverlay = document.getElementById('exportH5pTopicOverlay');
+const exportH5pTopicList = document.getElementById('exportH5pTopicList');
+const exportH5pBtnCancel = document.getElementById('exportH5pBtnCancel');
 const topicFormContainer = document.getElementById('topicFormContainer');
 const topicForm = document.getElementById('topicForm');
 const topicFormTitle = document.getElementById('topicFormTitle');
@@ -116,6 +121,7 @@ const filterType = document.getElementById('filterType');
 const btnCreateModule = document.getElementById('btnCreateModule');
 const btnExportCurrentTopic = document.getElementById('btnExportCurrentTopic');
 const btnImportModules = document.getElementById('btnImportModules');
+const btnExportModulesAsH5p = document.getElementById('btnExportModulesAsH5p');
 const modulesList = document.getElementById('modulesList');
 
 // Import Modules Modal
@@ -379,6 +385,7 @@ async function refreshTopicsList() {
         <span class="empty-icon">📂</span>
         <p>Noch keine Lernthemen erstellt.</p>
       </div>`;
+    if (btnExportH5p) btnExportH5p.disabled = true;
     return;
   }
 
@@ -457,7 +464,58 @@ async function refreshTopicsList() {
 
     topicsList.appendChild(card);
   }
+
+  // Enable toolbar export button only when at least one non-RAW topic has an active module
+  if (btnExportH5p) {
+    btnExportH5p.disabled = !topics.some(
+      (t) => t.h5pImportMode !== 'raw' && (t.modules || []).some((m) => m.moduleSelected !== false)
+    );
+  }
 }
+
+btnExportH5p.addEventListener('click', () => {
+  const exportable = topics.filter(
+    (t) => t.h5pImportMode !== 'raw' && (t.modules || []).some((m) => m.moduleSelected !== false)
+  );
+  if (exportable.length === 0) return;
+
+  // If only one exportable topic, export directly without the picker
+  if (exportable.length === 1) {
+    appApi.exportTopicAsH5p(exportable[0].id).then((result) => {
+      if (result.success) showToast('📦 H5P exportiert!', 'success');
+      else if (result.error) showToast('❌ H5P-Export fehlgeschlagen: ' + result.error, 'error');
+    });
+    return;
+  }
+
+  // Multiple exportable topics → show picker overlay
+  exportH5pTopicList.innerHTML = '';
+  for (const topic of exportable) {
+    const activeCount = (topic.modules || []).filter((m) => m.moduleSelected !== false).length;
+    const item = document.createElement('div');
+    item.className = 'import-module-item';
+    item.style.justifyContent = 'space-between';
+    item.innerHTML = `
+      <div>
+        <span class="import-module-title">📚 ${escapeHtml(topic.title)}</span>
+        <span class="import-module-type">${activeCount} aktive Modul${activeCount !== 1 ? 'e' : ''}</span>
+      </div>
+      <button class="btn btn-primary btn-sm">📦 Exportieren</button>
+    `;
+    item.querySelector('button').addEventListener('click', async () => {
+      exportH5pTopicOverlay.classList.add('hidden');
+      const result = await appApi.exportTopicAsH5p(topic.id);
+      if (result.success) showToast('📦 H5P exportiert!', 'success');
+      else if (result.error) showToast('❌ H5P-Export fehlgeschlagen: ' + result.error, 'error');
+    });
+    exportH5pTopicList.appendChild(item);
+  }
+  exportH5pTopicOverlay.classList.remove('hidden');
+});
+
+exportH5pBtnCancel.addEventListener('click', () => {
+  exportH5pTopicOverlay.classList.add('hidden');
+});
 
 function updateModulesToolbarForTopicMode() {
   const isRaw = !!currentTopicRawSummary;
@@ -468,6 +526,10 @@ function updateModulesToolbarForTopicMode() {
   if (btnImportModules) {
     btnImportModules.disabled = isRaw;
     btnImportModules.title = isRaw ? 'Bei RAW-H5P Projekten ist der Modulimport deaktiviert.' : '';
+  }
+  if (btnExportModulesAsH5p) {
+    btnExportModulesAsH5p.disabled = isRaw;
+    btnExportModulesAsH5p.title = isRaw ? 'Bei RAW-H5P Projekten ist der einzelne H5P-Export deaktiviert.' : 'Alle aktiven Module als einzelne H5P-Dateien exportieren';
   }
 }
 
@@ -683,6 +745,19 @@ btnExportCurrentTopic.addEventListener('click', async () => {
   if (!currentTopicId) return;
   const result = await appApi.exportTopic(currentTopicId);
   if (result.success) showToast(t('topics.exported'), 'success');
+});
+
+btnExportModulesAsH5p.addEventListener('click', async () => {
+  if (!currentTopicId) return;
+  const result = await appApi.exportSelectedModulesAsH5p(currentTopicId);
+  if (result.success) {
+    const msg = result.exported === result.total
+      ? `📦 ${result.exported} Modul(e) als H5P exportiert!`
+      : `📦 ${result.exported} von ${result.total} Modul(en) exportiert.`;
+    showToast(result.errors && result.errors.length > 0 ? msg + ` (${result.errors.length} Fehler)` : msg, 'success');
+  } else if (result.error) {
+    showToast('❌ H5P-Export fehlgeschlagen: ' + result.error, 'error');
+  }
 });
 
 // --- Import Modules ---
