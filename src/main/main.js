@@ -21,6 +21,7 @@ const DB_FILE = path.join(DATA_DIR, 'database.json');
 const DEFAULT_DB = {
   admin: { username: 'admin', password: 'lehrer1' },
   topics: [],
+  examMode: false,
   results: [],
   studentSelectedTopics: {},
   nextResultId: 1,
@@ -42,6 +43,7 @@ function loadDB() {
   // Ensure all keys exist (migration from old format)
   if (!db.admin) db.admin = DEFAULT_DB.admin;
   if (!db.topics) db.topics = [];
+  if (typeof db.examMode !== 'boolean') db.examMode = false;
   if (!db.results) db.results = [];
   if (!db.studentSelectedTopics) db.studentSelectedTopics = {};
   if (!db.nextResultId) db.nextResultId = 1;
@@ -1122,6 +1124,12 @@ function startWebServer() {
     res.json({ success: true, id: resultData.id });
   });
 
+  // Exam mode endpoint for browser students
+  web.get('/api/exam-mode', (_req, res) => {
+    const db = loadDB();
+    res.json({ enabled: !!db.examMode });
+  });
+
   // QR code endpoint — generates SVG dynamically
   web.get('/api/qrcode.svg', async (_req, res) => {
     if (!webServerUrl) return res.status(503).send('Server not ready');
@@ -1304,6 +1312,18 @@ ipcMain.handle('toggle-topic-selection', (_event, topicId, selected) => {
     saveDB(db);
   }
   return { success: true };
+});
+
+ipcMain.handle('get-exam-mode', () => {
+  const db = loadDB();
+  return { enabled: !!db.examMode };
+});
+
+ipcMain.handle('set-exam-mode', (_event, enabled) => {
+  const db = loadDB();
+  db.examMode = !!enabled;
+  saveDB(db);
+  return { success: true, enabled: db.examMode };
 });
 
 // --- IPC: Modules CRUD (within a topic) ---

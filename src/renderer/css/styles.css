@@ -1009,6 +1009,27 @@ body {
   background: #dbeafe;
 }
 
+.exam-mode-row {
+  margin: 12px 0 18px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+
+.exam-mode-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.exam-mode-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+
 /* ===== Drag and Drop Visual Editor ===== */
 .dnd-img-controls {
   display: flex;

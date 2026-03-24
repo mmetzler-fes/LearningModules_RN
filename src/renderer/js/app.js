@@ -23,6 +23,8 @@ const browserApi = {
   // Not available in browser — return safe defaults
   verifyAdmin: () => Promise.resolve(false),
   getTopics: () => fetch('/api/selected-topics').then(r => r.json()),
+  getExamMode: () => fetch('/api/exam-mode').then(r => r.json()),
+  setExamMode: () => Promise.resolve({ success: false, enabled: false }),
   getAdminCredentials: () => Promise.resolve({ username: '', password: '' }),
   updateAdminPassword: () => Promise.resolve({ success: false }),
   saveTopic: () => Promise.resolve({ success: false }),
@@ -62,6 +64,7 @@ let editingModuleId = null;
 let editingTopicId = null;
 let contentEditor = null;
 let moduleDescEditorInitialized = false;
+let examModeEnabled = false;
 
 // Quiz state
 let quizState = null; // { topicId, modules, currentIndex, answers, startTime }
@@ -102,6 +105,7 @@ const btnNewTopic = document.getElementById('btnNewTopic');
 const btnImportTopic = document.getElementById('btnImportTopic');
 const btnImportH5p = document.getElementById('btnImportH5p');
 const btnExportH5p = document.getElementById('btnExportH5p');
+const chkExamMode = document.getElementById('chkExamMode');
 const exportH5pTopicOverlay = document.getElementById('exportH5pTopicOverlay');
 const exportH5pTopicList = document.getElementById('exportH5pTopicList');
 const exportH5pBtnCancel = document.getElementById('exportH5pBtnCancel');
@@ -418,6 +422,8 @@ async function enterApp() {
   loginScreen.classList.add('hidden');
   appContainer.classList.remove('hidden');
 
+  await loadExamMode();
+
   // Show role-specific nav
   if (currentUser.role === 'teacher') {
     teacherNav.classList.remove('hidden');
@@ -439,6 +445,16 @@ async function enterApp() {
   } else {
     navigateToView('student-topics');
   }
+}
+
+if (chkExamMode) {
+  chkExamMode.addEventListener('change', async (e) => {
+    const enabled = !!e.target.checked;
+    const result = await appApi.setExamMode(enabled);
+    examModeEnabled = !!(result && result.enabled);
+    chkExamMode.checked = examModeEnabled;
+    showToast(examModeEnabled ? '📝 Prüfungsmodus aktiviert' : '🧠 Lernmodus aktiviert', 'info');
+  });
 }
 
 // ==================== NAVIGATION ====================
@@ -494,6 +510,12 @@ function showToast(message, type = 'info') {
 
 async function loadTopics() {
   topics = await appApi.getTopics();
+}
+
+async function loadExamMode() {
+  const result = await appApi.getExamMode();
+  examModeEnabled = !!(result && result.enabled);
+  if (chkExamMode) chkExamMode.checked = examModeEnabled;
 }
 
 // ==================== TEACHER: DASHBOARD ====================
@@ -1173,6 +1195,7 @@ async function refreshResults() {
                 <div>
                   <strong>${escapeHtml(d.moduleName || d.moduleTitle || '')}</strong>
                   ${d.userAnswer !== undefined ? `<br>Antwort: ${escapeHtml(String(d.userAnswer))}` : ''}
+                  ${d.score ? `<br>Auswertung: ${escapeHtml(String(d.score))}` : ''}
                   ${d.correctAnswer !== undefined ? `<br>Korrekt: ${escapeHtml(String(d.correctAnswer))}` : ''}
                 </div>
               </div>
@@ -1306,6 +1329,9 @@ async function startQuiz(topic) {
     return;
   }
 
+  // Refresh exam mode so browser students get the latest teacher setting
+  await loadExamMode();
+
   quizState = {
     topicId: topic.id,
     topicTitle: topic.title,
@@ -1337,7 +1363,10 @@ function renderQuizModule() {
 
   // Render module in quiz container
   quizModuleContainer.innerHTML = '';
-  renderH5pPreview(mod, typeDef, quizModuleContainer);
+  renderH5pPreview(mod, typeDef, quizModuleContainer, {
+    quizMode: true,
+    examMode: examModeEnabled && currentUser && currentUser.role === 'student',
+  });
 
   // Button text
   btnQuizNext.textContent = currentIndex < modules.length - 1 ? t('quiz.next') : t('quiz.finish');
@@ -1385,13 +1414,23 @@ function collectQuizAnswer(mod) {
       const inputs = quizModuleContainer.querySelectorAll('input[name="mc-answer"]');
       const selected = [];
       const correctList = [];
+      let correctDecisions = 0;
+      let totalDecisions = 0;
       inputs.forEach((inp, i) => {
         if (inp.checked) selected.push(i);
         if (inp.dataset.correct === 'true') correctList.push(i);
+        const isCorrect = inp.dataset.correct === 'true';
+        if (inp.checked === isCorrect) correctDecisions++;
+        totalDecisions++;
       });
       result.userAnswer = selected.map((i) => (content.answers || [])[i]?.text || i).join(', ');
       result.correctAnswer = correctList.map((i) => (content.answers || [])[i]?.text || i).join(', ');
-      result.isCorrect = selected.length === correctList.length && selected.every((s) => correctList.includes(s));
+      result.isCorrect = totalDecisions > 0 && correctDecisions === totalDecisions;
+      if (totalDecisions > 0) {
+        const correctPct = Math.round((correctDecisions / totalDecisions) * 100);
+        const wrongPct = 100 - correctPct;
+        result.score = `Richtig: ${correctPct}% | Falsch: ${wrongPct}%`;
+      }
       break;
     }
     case 'trueFalse': {
@@ -1408,7 +1447,11 @@ function collectQuizAnswer(mod) {
       result.isCorrect = tfCorrectCount === tfQs.length;
       result.userAnswer = tfUserAnswers.join(', ');
       result.correctAnswer = tfCorrectAnswers.join(', ');
-      result.score = `${tfCorrectCount}/${tfQs.length}`;
+      if (tfQs.length > 0) {
+        const correctPct = Math.round((tfCorrectCount / tfQs.length) * 100);
+        const wrongPct = 100 - correctPct;
+        result.score = `Richtig: ${correctPct}% | Falsch: ${wrongPct}%`;
+      }
       break;
     }
     case 'fillInTheBlanks': {
@@ -1569,12 +1612,15 @@ async function finishQuiz() {
       </div>
       <p>${t('quiz.topic')}: <strong>${escapeHtml(quizState.topicTitle)}</strong></p>
       <div class="quiz-result-details">
-        ${quizState.answers.map((a, i) => `
+        ${examModeEnabled
+          ? '<p style="color:var(--text-secondary);">Prüfungsmodus aktiv: Detail-Rückmeldung ist ausgeblendet.</p>'
+          : quizState.answers.map((a, i) => `
           <div class="result-detail-item ${a.isCorrect ? 'correct' : 'wrong'}">
             <span class="result-detail-icon">${a.isCorrect ? '✅' : '❌'}</span>
             <div>
               <strong>${i + 1}. ${escapeHtml(a.moduleTitle)}</strong>
               ${a.userAnswer ? `<br>${t('common.your.answer')}: ${escapeHtml(String(a.userAnswer))}` : ''}
+              ${a.score ? `<br>Auswertung: ${escapeHtml(String(a.score))}` : ''}
               ${!a.isCorrect && a.correctAnswer ? `<br>${t('results.correct')}: ${escapeHtml(String(a.correctAnswer))}` : ''}
             </div>
           </div>
@@ -1599,7 +1645,7 @@ async function finishQuiz() {
 
 // ==================== H5P PREVIEW RENDER ====================
 
-function renderH5pPreview(mod, typeDef, container) {
+function renderH5pPreview(mod, typeDef, container, options = {}) {
   const content = mod.content || {};
   const wrapper = document.createElement('div');
   wrapper.style.maxWidth = '800px';
@@ -1624,7 +1670,7 @@ function renderH5pPreview(mod, typeDef, container) {
     wrapper.appendChild(desc);
   }
 
-  const previewEl = createTypePreview(mod.type, content);
+  const previewEl = createTypePreview(mod.type, content, options);
   wrapper.appendChild(previewEl);
 
   container.appendChild(wrapper);
@@ -1645,7 +1691,8 @@ function renderModuleImage(content, options = {}) {
   `;
 }
 
-function createTypePreview(type, content) {
+function createTypePreview(type, content, options = {}) {
+  const suppressFeedback = !!(options.quizMode && options.examMode);
   const div = document.createElement('div');
 
   switch (type) {
@@ -1677,7 +1724,7 @@ function createTypePreview(type, content) {
           <div class="quiz-area" style="display:none; margin-top:20px;"></div>
         </div>
       `;
-      startArithmeticQuiz(div.querySelector('.quiz-area'), content);
+      startArithmeticQuiz(div.querySelector('.quiz-area'), content, suppressFeedback);
       break;
     }
     case 'multipleChoice': {
@@ -1687,8 +1734,7 @@ function createTypePreview(type, content) {
         ${renderModuleImage(content)}
         <p style="font-weight:600; margin-bottom:16px;">${escapeHtml(q)}</p>
         <div class="mc-answers"></div>
-        <button class="btn btn-primary btn-sm" style="margin-top:16px;" id="mcCheck">Überprüfen</button>
-        <div id="mcFeedback" style="margin-top:12px;"></div>
+        ${suppressFeedback ? '' : '<button class="btn btn-primary btn-sm" style="margin-top:16px;" id="mcCheck">Überprüfen</button><div id="mcFeedback" style="margin-top:12px;"></div>'}
       </div>`;
       const answersEl = div.querySelector('.mc-answers');
       const isSingle = content.singleAnswer;
@@ -1706,7 +1752,8 @@ function createTypePreview(type, content) {
         row.appendChild(label);
         answersEl.appendChild(row);
       });
-      div.querySelector('#mcCheck').addEventListener('click', () => {
+      const mcCheckBtn = div.querySelector('#mcCheck');
+      if (mcCheckBtn) mcCheckBtn.addEventListener('click', () => {
         const inputs = answersEl.querySelectorAll('input');
         let allCorrect = true;
         inputs.forEach((inp) => {
@@ -1766,11 +1813,16 @@ function createTypePreview(type, content) {
           tfFalse.classList.remove('tf-selected');
           if (q._userAnswer === 'true') tfTrue.classList.add('tf-selected');
           if (q._userAnswer === 'false') tfFalse.classList.add('tf-selected');
-          const correct = tfResults[tfIdx];
-          tfFeedback.innerHTML = correct
-            ? `<span class="tf-correct">✓ ${escapeHtml(q.feedbackCorrect || 'Richtig!')}</span>`
-            : `<span class="tf-wrong">✗ ${escapeHtml(q.feedbackWrong || 'Leider falsch.')}</span>`;
-          tfFeedback.className = 'tf-feedback ' + (correct ? 'tf-feedback-correct' : 'tf-feedback-wrong');
+          if (suppressFeedback) {
+            tfFeedback.innerHTML = '';
+            tfFeedback.className = 'tf-feedback';
+          } else {
+            const correct = tfResults[tfIdx];
+            tfFeedback.innerHTML = correct
+              ? `<span class="tf-correct">✓ ${escapeHtml(q.feedbackCorrect || 'Richtig!')}</span>`
+              : `<span class="tf-wrong">✗ ${escapeHtml(q.feedbackWrong || 'Leider falsch.')}</span>`;
+            tfFeedback.className = 'tf-feedback ' + (correct ? 'tf-feedback-correct' : 'tf-feedback-wrong');
+          }
         } else {
           tfTrue.disabled = false;
           tfFalse.disabled = false;
@@ -1783,6 +1835,10 @@ function createTypePreview(type, content) {
       };
 
       const updateTfScore = () => {
+        if (suppressFeedback) {
+          tfScore.textContent = '';
+          return;
+        }
         const answered = tfResults.filter(r => r !== null).length;
         const correct = tfResults.filter(r => r === true).length;
         tfScore.textContent = answered > 0 ? `${correct}/${answered} richtig` : '';
@@ -1874,6 +1930,11 @@ function createTypePreview(type, content) {
         };
 
         const showFeedback = (correct, answer) => {
+          if (suppressFeedback) {
+            fcFeedback.innerHTML = '<span style="font-weight:600;">Antwort gespeichert.</span>';
+            fcFeedback.className = 'fc-feedback';
+            return;
+          }
           if (correct) {
             fcFeedback.innerHTML = `<span class="fc-correct">✅ Richtig!</span>`;
             fcFeedback.className = 'fc-feedback fc-feedback-correct';
@@ -1884,6 +1945,10 @@ function createTypePreview(type, content) {
         };
 
         const updateScore = () => {
+          if (suppressFeedback) {
+            fcScore.textContent = '';
+            return;
+          }
           const answered = cardResults.filter(r => r !== null).length;
           const correct = cardResults.filter(r => r === true).length;
           if (answered > 0) {
@@ -2041,8 +2106,7 @@ function createTypePreview(type, content) {
         ${content.taskDescription ? `<p style="margin-bottom:16px;">${escapeHtml(content.taskDescription)}</p>` : ''}
         ${renderModuleImage(content)}
         <div id="blanksArea"></div>
-        <button class="btn btn-primary btn-sm" style="margin-top:16px;" id="blanksCheck">Überprüfen</button>
-        <div id="blanksFeedback" style="margin-top:12px;"></div>
+        ${suppressFeedback ? '' : '<button class="btn btn-primary btn-sm" style="margin-top:16px;" id="blanksCheck">Überprüfen</button><div id="blanksFeedback" style="margin-top:12px;"></div>'}
       </div>`;
       const blanksArea = div.querySelector('#blanksArea');
       const answerMap = [];
@@ -2064,7 +2128,8 @@ function createTypePreview(type, content) {
         });
         blanksArea.appendChild(p);
       });
-      div.querySelector('#blanksCheck').addEventListener('click', () => {
+      const blanksCheckBtn = div.querySelector('#blanksCheck');
+      if (blanksCheckBtn) blanksCheckBtn.addEventListener('click', () => {
         let correct = 0;
         const caseSensitive = content.caseSensitive;
         answerMap.forEach(({ answer, inputEl }) => {
@@ -2086,12 +2151,12 @@ function createTypePreview(type, content) {
         ${renderModuleImage(content)}
         <textarea id="essayAnswer" rows="${rows}" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); resize:vertical;"></textarea>
         <div style="display:flex; align-items:center; gap:12px; margin-top:12px; flex-wrap:wrap;">
-          <button class="btn btn-primary btn-sm" id="essayCheck">Überprüfen</button>
+          ${suppressFeedback ? '' : '<button class="btn btn-primary btn-sm" id="essayCheck">Überprüfen</button>'}
           ${minChars > 0 ? `<span style="font-size:0.85rem; color:var(--text-secondary);">Min. ${minChars} Zeichen</span>` : ''}
           <span id="essayCounter" style="font-size:0.85rem; color:var(--text-secondary);">0 Zeichen</span>
         </div>
-        <div id="essayFeedback" style="margin-top:12px;"></div>
-        ${content.sampleSolution ? `<details style="margin-top:12px;"><summary style="cursor:pointer;">Musterlösung anzeigen</summary><div style="margin-top:8px; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); white-space:pre-wrap;">${escapeHtml(content.sampleSolution)}</div></details>` : ''}
+        ${suppressFeedback ? '' : '<div id="essayFeedback" style="margin-top:12px;"></div>'}
+        ${!suppressFeedback && content.sampleSolution ? `<details style="margin-top:12px;"><summary style="cursor:pointer;">Musterlösung anzeigen</summary><div style="margin-top:8px; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); white-space:pre-wrap;">${escapeHtml(content.sampleSolution)}</div></details>` : ''}
       </div>`;
 
       const essayInput = div.querySelector('#essayAnswer');
@@ -2102,7 +2167,8 @@ function createTypePreview(type, content) {
         essayCounter.textContent = `${len} Zeichen`;
       };
       essayInput.addEventListener('input', updateCounter);
-      div.querySelector('#essayCheck').addEventListener('click', () => {
+      const essayCheckBtn = div.querySelector('#essayCheck');
+      if (essayCheckBtn) essayCheckBtn.addEventListener('click', () => {
         const len = (essayInput.value || '').trim().length;
         const ok = minChars <= 0 ? len > 0 : len >= minChars;
         essayInput.style.borderColor = ok ? 'green' : 'red';
@@ -2118,8 +2184,7 @@ function createTypePreview(type, content) {
         ${renderModuleImage(content)}
         <div class="dtw-text-area" id="dtwTextArea"></div>
         <div class="dtw-word-bank" id="dtwWordBank"></div>
-        <button class="btn btn-primary btn-sm" style="margin-top:16px;" id="dtwCheck">Überprüfen</button>
-        <div id="dtwFeedback" style="margin-top:12px;"></div>
+        ${suppressFeedback ? '' : '<button class="btn btn-primary btn-sm" style="margin-top:16px;" id="dtwCheck">Überprüfen</button><div id="dtwFeedback" style="margin-top:12px;"></div>'}
       </div>`;
       const text = content.textField || '';
       const textArea = div.querySelector('#dtwTextArea');
@@ -2232,7 +2297,8 @@ function createTypePreview(type, content) {
         }
       });
 
-      div.querySelector('#dtwCheck').addEventListener('click', () => {
+      const dtwCheckBtn = div.querySelector('#dtwCheck');
+      if (dtwCheckBtn) dtwCheckBtn.addEventListener('click', () => {
         const zones = textArea.querySelectorAll('.dtw-drop-zone');
         let correct = 0;
         zones.forEach((z) => {
@@ -2257,8 +2323,7 @@ function createTypePreview(type, content) {
         ${content.taskDescription ? `<p style="margin-bottom:16px;">${escapeHtml(content.taskDescription)}</p>` : ''}
         ${renderModuleImage(content)}
         <div id="wordsArea" style="line-height:2.2;"></div>
-        <button class="btn btn-primary btn-sm" style="margin-top:16px;" id="wordsCheck">Überprüfen</button>
-        <div id="wordsFeedback" style="margin-top:12px;"></div>
+        ${suppressFeedback ? '' : '<button class="btn btn-primary btn-sm" style="margin-top:16px;" id="wordsCheck">Überprüfen</button><div id="wordsFeedback" style="margin-top:12px;"></div>'}
       </div>`;
       const text = content.textField || '';
       const wordsArea = div.querySelector('#wordsArea');
@@ -2296,7 +2361,8 @@ function createTypePreview(type, content) {
           wordsArea.appendChild(makeWordSpan(part, true));
         }
       });
-      div.querySelector('#wordsCheck').addEventListener('click', () => {
+      const wordsCheckBtn = div.querySelector('#wordsCheck');
+      if (wordsCheckBtn) wordsCheckBtn.addEventListener('click', () => {
         const allSpans = wordsArea.querySelectorAll('span');
         let correct = 0;
         let total = correctWords.length;
@@ -2343,8 +2409,7 @@ function createTypePreview(type, content) {
       div.innerHTML = `<div style="padding:20px; background:var(--bg-primary); border-radius:var(--radius-md);">
         <p style="margin-bottom:16px; font-weight:600;">Diktat — Schreiben Sie die gehörten Sätze:</p>
         <div id="dictArea"></div>
-        <button class="btn btn-primary btn-sm" style="margin-top:16px;" id="dictCheck">Überprüfen</button>
-        <div id="dictFeedback" style="margin-top:12px;"></div>
+        ${suppressFeedback ? '' : '<button class="btn btn-primary btn-sm" style="margin-top:16px;" id="dictCheck">Überprüfen</button><div id="dictFeedback" style="margin-top:12px;"></div>'}
       </div>`;
       const dictArea = div.querySelector('#dictArea');
       sentences.forEach((s, i) => {
@@ -2356,7 +2421,8 @@ function createTypePreview(type, content) {
         `;
         dictArea.appendChild(row);
       });
-      div.querySelector('#dictCheck').addEventListener('click', () => {
+      const dictCheckBtn = div.querySelector('#dictCheck');
+      if (dictCheckBtn) dictCheckBtn.addEventListener('click', () => {
         const inputs = dictArea.querySelectorAll('.dict-input');
         let correct = 0;
         inputs.forEach((inp) => {
@@ -2635,7 +2701,7 @@ function createTypePreview(type, content) {
   return div;
 }
 
-function startArithmeticQuiz(container, content) {
+function startArithmeticQuiz(container, content, suppressFeedback) {
   if (!container) return;
   const type = content.arithmeticType || 'addition';
   const max = content.maxNumber || 10;
@@ -2661,14 +2727,16 @@ function startArithmeticQuiz(container, content) {
 
   const render = () => {
     if (qIdx >= questions.length) {
-      container.innerHTML = `<h3>Ergebnis: ${score} / ${questions.length}</h3>`;
+      container.innerHTML = suppressFeedback
+        ? `<h3>Alle Fragen beantwortet.</h3>`
+        : `<h3>Ergebnis: ${score} / ${questions.length}</h3>`;
       return;
     }
     container.innerHTML = `
       <p style="font-size:1.3rem; font-weight:600; margin-bottom:12px;">${questions[qIdx].display}</p>
       <input type="number" id="quizAnswer" style="padding:8px 12px; border:1px solid var(--border); border-radius:4px; width:120px; text-align:center; font-size:1.1rem;" autofocus>
       <button class="btn btn-primary btn-sm" style="margin-left:8px;" id="quizSubmit">→</button>
-      <p style="margin-top:8px; font-size:0.85rem; color:var(--text-secondary);">Frage ${qIdx + 1} von ${questions.length} — Punkte: ${score}</p>
+      <p style="margin-top:8px; font-size:0.85rem; color:var(--text-secondary);">Frage ${qIdx + 1} von ${questions.length}${suppressFeedback ? '' : ` — Punkte: ${score}`}</p>
     `;
     container.querySelector('#quizSubmit').addEventListener('click', () => {
       const val = parseFloat(container.querySelector('#quizAnswer').value);

@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('api', {
 
   // Topics CRUD
   getTopics: () => ipcRenderer.invoke('get-topics'),
+  getExamMode: () => ipcRenderer.invoke('get-exam-mode'),
+  setExamMode: (enabled) => ipcRenderer.invoke('set-exam-mode', enabled),
   saveTopic: (topicData) => ipcRenderer.invoke('save-topic', topicData),
   deleteTopic: (topicId) => ipcRenderer.invoke('delete-topic', topicId),
   toggleTopicSelection: (topicId, selected) => ipcRenderer.invoke('toggle-topic-selection', topicId, selected),
