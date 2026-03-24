@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background gradient: blue → dark navy -->
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop offset="0%"   stop-color="#1d4ed8"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <!-- Left page: slightly darker on outer edge -->
+    <linearGradient id="pageLeftGrad" x1="1" y1="0" x2="0" y2="0" gradientUnits="objectBoundingBox">
+      <stop offset="0%"   stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#dde4ee"/>
+    </linearGradient>
+    <!-- Right page: slightly darker on outer edge -->
+    <linearGradient id="pageRightGrad" x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+      <stop offset="0%"   stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#dde4ee"/>
+    </linearGradient>
+    <!-- Drop shadow for the book -->
+    <filter id="bookShadow" x="-18%" y="-15%" width="136%" height="136%">
+      <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#000" flood-opacity="0.55"/>
+    </filter>
+    <!-- Drop shadow for the badge -->
+    <filter id="badgeShadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <!-- ── Background ── -->
+  <rect width="512" height="512" rx="80" ry="80" fill="url(#bgGrad)"/>
+  <!-- Subtle top-left highlight shimmer -->
+  <ellipse cx="170" cy="130" rx="200" ry="90" fill="white" opacity="0.04"/>
+
+  <!-- ── Open Book ── -->
+  <g filter="url(#bookShadow)">
+    <!-- Left page (slightly tapered for perspective) -->
+    <path d="M256,92 L96,116 C91,119 88,124 88,130 L88,400 C88,406 93,411 99,410 L256,424 Z"
+          fill="url(#pageLeftGrad)"/>
+    <!-- Right page -->
+    <path d="M256,92 L416,116 C421,119 424,124 424,130 L424,400 C424,406 419,411 413,410 L256,424 Z"
+          fill="url(#pageRightGrad)"/>
+  </g>
+
+  <!-- Book spine -->
+  <line x1="256" y1="90" x2="256" y2="426"
+        stroke="#3b82f6" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- ══ LEFT PAGE ══ -->
+  <!-- Bold title line -->
+  <rect x="112" y="154" width="124" height="13" rx="6.5" fill="#334155"/>
+  <!-- Six text stubs of varied width -->
+  <rect x="112" y="184" width="110" height="9"  rx="4.5" fill="#94a3b8"/>
+  <rect x="112" y="204" width="118" height="9"  rx="4.5" fill="#94a3b8"/>
+  <rect x="112" y="224" width="90"  height="9"  rx="4.5" fill="#94a3b8"/>
+  <!-- Dashed divider -->
+  <line x1="112" y1="243" x2="230" y2="243"
+        stroke="#cbd5e1" stroke-width="2" stroke-dasharray="5,4"/>
+  <rect x="112" y="256" width="114" height="9"  rx="4.5" fill="#94a3b8"/>
+  <rect x="112" y="276" width="95"  height="9"  rx="4.5" fill="#94a3b8"/>
+  <rect x="112" y="296" width="106" height="9"  rx="4.5" fill="#94a3b8"/>
+  <rect x="112" y="316" width="78"  height="9"  rx="4.5" fill="#94a3b8"/>
+  <rect x="112" y="336" width="100" height="9"  rx="4.5" fill="#94a3b8"/>
+
+  <!-- ══ RIGHT PAGE ══ -->
+  <!-- Bold question line -->
+  <rect x="276" y="154" width="122" height="13" rx="6.5" fill="#334155"/>
+
+  <!-- Option 1: highlighted / selected (blue) -->
+  <rect x="276" y="184" width="130" height="30" rx="8" fill="#3b82f6"/>
+  <!-- Radio button: filled -->
+  <circle cx="292" cy="199" r="9"  fill="white" opacity="0.25"/>
+  <circle cx="292" cy="199" r="5"  fill="white"/>
+  <rect   x="308" y="194" width="88" height="9" rx="4.5" fill="white" opacity="0.9"/>
+
+  <!-- Option 2 -->
+  <rect x="276" y="226" width="130" height="30" rx="8" fill="#e8ecf3"/>
+  <circle cx="292" cy="241" r="9"  fill="none" stroke="#cbd5e1" stroke-width="2.5"/>
+  <rect   x="308" y="236" width="88" height="9" rx="4.5" fill="#94a3b8"/>
+
+  <!-- Option 3 -->
+  <rect x="276" y="268" width="130" height="30" rx="8" fill="#e8ecf3"/>
+  <circle cx="292" cy="283" r="9"  fill="none" stroke="#cbd5e1" stroke-width="2.5"/>
+  <rect   x="308" y="278" width="72" height="9" rx="4.5" fill="#94a3b8"/>
+
+  <!-- Option 4 -->
+  <rect x="276" y="310" width="130" height="30" rx="8" fill="#e8ecf3"/>
+  <circle cx="292" cy="325" r="9"  fill="none" stroke="#cbd5e1" stroke-width="2.5"/>
+  <rect   x="308" y="320" width="80" height="9" rx="4.5" fill="#94a3b8"/>
+
+  <!-- ══ SUCCESS BADGE (bottom-right overlap) ══ -->
+  <circle cx="388" cy="392" r="48" fill="#16a34a" filter="url(#badgeShadow)"/>
+  <!-- White star burst ring -->
+  <circle cx="388" cy="392" r="42" fill="none" stroke="white" stroke-width="4" opacity="0.35"/>
+  <!-- Checkmark -->
+  <polyline points="366,392 381,408 412,370"
+            fill="none" stroke="white" stroke-width="10"
+            stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- ══ TOP ACCENT: four coloured module-type dots ══ -->
+  <!-- These represent the variety of module types -->
+  <circle cx="204" cy="60" r="13" fill="#f59e0b"/>
+  <circle cx="236" cy="60" r="13" fill="#ef4444"/>
+  <circle cx="268" cy="60" r="13" fill="#22c55e"/>
+  <circle cx="300" cy="60" r="13" fill="#a855f7"/>
+  <!-- Small "LM" text below dots -->
+  <text x="252" y="456"
+        text-anchor="middle"
+        font-family="'Helvetica Neue', Arial, sans-serif"
+        font-size="38" font-weight="700" letter-spacing="4"
+        fill="white" opacity="0.85">LM</text>
+</svg>
