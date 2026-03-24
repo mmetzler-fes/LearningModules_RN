@@ -517,20 +517,21 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
 
   if (mod.type === 'trueFalse') {
     const content = mod.content || {};
-    const firstQuestion = Array.isArray(content.questions) && content.questions.length > 0
-      ? content.questions[0]
-      : {};
+    const tfQuestions = Array.isArray(content.questions) && content.questions.length > 0
+      ? content.questions
+      : [content];
     const { image, addedImages } = resolveTopicImage(content.imageUrl || '', topicImages, `tf-${mod.id || 'module'}`);
+    const mediaObj = image
+      ? { type: { library: 'H5P.Image 1.1', params: { file: image } }, disableImageZooming: false }
+      : { disableImageZooming: false };
 
-    return {
-      question: buildQuestionWithSource(mod, 'H5P.TrueFalse', {
+    const questions = tfQuestions.map((q, idx) => {
+      return buildQuestionWithSource(mod, 'H5P.TrueFalse', {
         library: 'H5P.TrueFalse 1.8',
         params: {
-          media: image
-            ? { type: { library: 'H5P.Image 1.1', params: { file: image } }, disableImageZooming: false }
-            : { disableImageZooming: false },
-          question: `<p>${escapeHtmlForH5p(firstQuestion.question || '')}</p>`,
-          correct: (firstQuestion.correctAnswer || 'false') === 'true',
+          media: idx === 0 ? mediaObj : { disableImageZooming: false },
+          question: `<p>${escapeHtmlForH5p(q.question || '')}</p>`,
+          correct: (q.correctAnswer || 'false') === 'true',
           l10n: {
             trueText: 'True',
             falseText: 'False',
@@ -538,8 +539,8 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
             checkAnswer: 'Check',
             showSolutionButton: 'Show solution',
             tryAgain: 'Retry',
-            wrongAnswerMessage: firstQuestion.feedbackWrong || 'Wrong answer',
-            correctAnswerMessage: firstQuestion.feedbackCorrect || 'Correct answer',
+            wrongAnswerMessage: q.feedbackWrong || 'Wrong answer',
+            correctAnswerMessage: q.feedbackCorrect || 'Correct answer',
           },
           behaviour: {
             enableRetry: content.enableRetry !== false,
@@ -561,13 +562,17 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
         metadata: {
           contentType: 'True/False Question',
           license: 'U',
-          title: mod.title,
+          title: tfQuestions.length > 1 ? `${mod.title} (${idx + 1})` : mod.title,
           authors: [],
           changes: [],
-          extraTitle: mod.title,
+          extraTitle: tfQuestions.length > 1 ? `${mod.title} (${idx + 1})` : mod.title,
         },
         subContentId: h5pUuid(),
-      }),
+      });
+    });
+
+    return {
+      questions,
       addedImages,
     };
   }
@@ -1818,9 +1823,12 @@ ipcMain.handle('export-topic-as-h5p', async (_event, topicId) => {
       const converted = convertNativeModuleToH5pQuestion(mod, topic.h5pImages || {});
       if (!converted) return null;
       Object.assign(exportImages, converted.addedImages || {});
+      // Some types (e.g. trueFalse) return multiple questions
+      if (converted.questions) return converted.questions;
       return converted.question;
     })
-    .filter(Boolean);
+    .filter(Boolean)
+    .flat();
 
   const h5pJson = {
     embedTypes: ['iframe'],
@@ -1897,52 +1905,61 @@ ipcMain.handle('export-selected-modules-as-h5p', async (_event, topicId) => {
         continue;
       }
 
-      const { question, addedImages } = converted;
-      const libraryStr = question.library || 'H5P.AdvancedText 1.1';
-      const parts = libraryStr.split(' ');
-      const machineName = parts[0];
-      const versionStr = parts[1] || '1.0';
-      const [majorStr, minorStr] = versionStr.split('.');
-      const majorVersion = parseInt(majorStr, 10) || 1;
-      const minorVersion = parseInt(minorStr, 10) || 0;
+      // Some types (e.g. trueFalse) return multiple questions
+      const questionsToExport = converted.questions
+        ? converted.questions
+        : [converted.question];
+      const { addedImages } = converted;
 
-      const h5pJson = {
-        embedTypes: ['iframe'],
-        language: 'de',
-        title: mod.title,
-        mainLibrary: machineName,
-        license: 'U',
-        defaultLanguage: 'de',
-        preloadedDependencies: [{ machineName, majorVersion, minorVersion }],
-        extraTitle: mod.title,
-      };
+      for (const question of questionsToExport) {
+        const libraryStr = question.library || 'H5P.AdvancedText 1.1';
+        const parts = libraryStr.split(' ');
+        const machineName = parts[0];
+        const versionStr = parts[1] || '1.0';
+        const [majorStr, minorStr] = versionStr.split('.');
+        const majorVersion = parseInt(majorStr, 10) || 1;
+        const minorVersion = parseInt(minorStr, 10) || 0;
 
-      const contentJson = question.params || {};
+        const exportTitle = (question.metadata && question.metadata.title) || mod.title;
 
-      // Unique, safe file name
-      let baseName = (mod.title || 'modul').replace(/[^\w\säöüÄÖÜß-]/g, '_').trim() || 'modul';
-      let fileName = `${baseName}.h5p`;
-      let counter = 1;
-      while (usedNames.has(fileName.toLowerCase())) {
-        fileName = `${baseName}_${counter++}.h5p`;
+        const h5pJson = {
+          embedTypes: ['iframe'],
+          language: 'de',
+          title: exportTitle,
+          mainLibrary: machineName,
+          license: 'U',
+          defaultLanguage: 'de',
+          preloadedDependencies: [{ machineName, majorVersion, minorVersion }],
+          extraTitle: exportTitle,
+        };
+
+        const contentJson = question.params || {};
+
+        // Unique, safe file name
+        let baseName = (exportTitle || 'modul').replace(/[^\w\säöüÄÖÜß-]/g, '_').trim() || 'modul';
+        let fileName = `${baseName}.h5p`;
+        let counter = 1;
+        while (usedNames.has(fileName.toLowerCase())) {
+          fileName = `${baseName}_${counter++}.h5p`;
+        }
+        usedNames.add(fileName.toLowerCase());
+
+        const filePath = path.join(exportDir, fileName);
+        const zipFiles = {
+          'h5p.json':              Buffer.from(JSON.stringify(h5pJson,    null, 2), 'utf8'),
+          'content/content.json':  Buffer.from(JSON.stringify(contentJson, null, 2), 'utf8'),
+        };
+
+        const allImages = { ...(topic.h5pImages || {}), ...(addedImages || {}) };
+        for (const [imgName, dataUrl] of Object.entries(allImages)) {
+          if (!dataUrl) continue;
+          const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+          if (b64) zipFiles[`content/images/${imgName}`] = Buffer.from(b64, 'base64');
+        }
+
+        fs.writeFileSync(filePath, createZip(zipFiles));
+        exported++;
       }
-      usedNames.add(fileName.toLowerCase());
-
-      const filePath = path.join(exportDir, fileName);
-      const zipFiles = {
-        'h5p.json':              Buffer.from(JSON.stringify(h5pJson,    null, 2), 'utf8'),
-        'content/content.json':  Buffer.from(JSON.stringify(contentJson, null, 2), 'utf8'),
-      };
-
-      const allImages = { ...(topic.h5pImages || {}), ...(addedImages || {}) };
-      for (const [imgName, dataUrl] of Object.entries(allImages)) {
-        if (!dataUrl) continue;
-        const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
-        if (b64) zipFiles[`content/images/${imgName}`] = Buffer.from(b64, 'base64');
-      }
-
-      fs.writeFileSync(filePath, createZip(zipFiles));
-      exported++;
     } catch (e) {
       errors.push(`"${mod.title}": ${e.message}`);
     }
