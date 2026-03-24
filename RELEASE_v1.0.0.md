@@ -12,6 +12,45 @@
 - Neue Export-Mappings: `dragAndDrop`, `multipleChoice`, `trueFalse`, `fillInTheBlanks`, `dragTheWords`, `markTheWords`, `accordion`, `flashcards`, `essay`
 - Smoke-Test-Skript ergänzt: `scripts/h5p-roundtrip-smoke.js`
 
+### Verlustfreier H5P-Roundtrip (h5pSource-Erhaltung)
+
+- Beim Import wird das **Original-H5P-Paket pro Modul** als `h5pSource` gespeichert (Params, Metadaten, Library-Info, subContentId)
+- Beim Export werden native Editor-Felder per **Deep-Merge** in die Originalstruktur zurückgeschrieben – unbekannte H5P-Felder gehen nicht verloren
+- Hilfsfunktionen `deepMergeObjects()` und `buildQuestionWithSource()` sichern den vollständigen Roundtrip für alle 8 nativen Typen
+- `save-module` behält `h5pSource` beim Bearbeiten eines Moduls erhalten, solange der Typ nicht geändert wird
+
+### Erweiterte Verhaltenfelder im nativen Editor
+
+Neue Felder im Editor für alle Quiz-Typen, die beim Import/Export korrekt übernommen werden:
+
+| Feld | Bedeutung |
+|------|-----------|
+| `enableRetry` | „Nochmals versuchen"-Schaltfläche |
+| `enableSolutionsButton` | „Lösung anzeigen"-Schaltfläche |
+| `randomAnswers` | Antworten zufällig sortieren |
+| `passPercentage` | Mindestprozentsatz zum Bestehen |
+| `showSolutionsRequiresInput` | Lösung erst nach Eingabe einblendbar |
+| `instantFeedback` | Sofortiges Feedback bei Auswahl |
+| `ignoreScoring` | Modul nicht in Gesamtpunktzahl einrechnen |
+| `pointsHost` | Punktevergabe beim Lehrergerät |
+
+### Gruppierter Editor mit „Erweiterte Optionen"
+
+- Felder mit `advanced: true` im Typen-Schema werden in einem **aufklappbaren Abschnitt** „Erweiterte Optionen" am Ende des Editors angezeigt
+- Reduziert die sichtbare Formularlänge für typische Anwendungsfälle
+- Gilt für alle Quiz-Typen: `multipleChoice`, `trueFalse`, `fillInTheBlanks`, `dragTheWords`, `markTheWords`, `essay`
+
+### Essay als nativer Modultyp
+
+- `H5P.Essay 1.5` vollständig als nativer Typ integriert
+- Felder: Aufgabenstellung, Musterlösung, Min. Zeichenanzahl, Eingabefeldgröße
+- Import, Export, Vorschau und Quiz-Auswertung vollständig umgesetzt
+
+### Sonstige Verbesserungen
+
+- Import-Modus Abfrage (nativ/roh) entfernt – Import läuft immer im nativen Modus
+- Rahmenbedingungen für „Raw"-H5P-Themen (1:1-Paketerhaltung, schreibgeschützte Modulliste, Badge „RAW H5P") als optionale Backend-Grundlage erhalten
+
 **Interaktive Lernmodule für den Unterricht** – eine Desktop-App für Lehrkräfte und Schüler:innen, mit der sich vielfältige Übungsformate erstellen, verwalten und im Klassenzimmer per WLAN verteilen lassen.
 
 ---

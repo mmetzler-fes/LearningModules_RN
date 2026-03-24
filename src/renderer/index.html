@@ -156,6 +156,13 @@
           <button class="btn btn-primary" id="btnNewTopic" data-i18n="topics.new">➕ Neues Lernthema</button>
           <button class="btn btn-secondary" id="btnImportTopic" data-i18n="topics.import">📥 Thema importieren</button>
           <button class="btn btn-secondary" id="btnImportH5p">📦 H5P importieren</button>
+          <button class="btn btn-secondary" id="btnExportH5p" disabled title="Thema als H5P exportieren">📦 H5P exportieren</button>
+        </div>
+        <div class="exam-mode-row">
+          <label class="exam-mode-label">
+            <input type="checkbox" id="chkExamMode" />
+            <span>Prüfungsmodus aktivieren (keine Sofort-Rückmeldung für Schüler)</span>
+          </label>
         </div>
         <div id="topicsList" class="topics-list"></div>
 
@@ -201,6 +208,7 @@
           <button class="btn btn-primary" id="btnCreateModule" data-i18n="modules.new">➕ Neues Modul</button>
           <button class="btn btn-secondary" id="btnImportModules">📥 Module importieren</button>
           <button class="btn btn-secondary" id="btnExportCurrentTopic" data-i18n="modules.export">📤 Thema exportieren</button>
+          <button class="btn btn-secondary" id="btnExportModulesAsH5p" title="Alle aktiven Module als einzelne H5P-Dateien exportieren">📦 Module als H5P</button>
         </div>
         <div class="modules-list" id="modulesList"></div>
       </section>
@@ -224,7 +232,33 @@
           </div>
           <div class="form-group">
             <label for="moduleDescription" data-i18n="module.desc.label">Beschreibung</label>
-            <textarea id="moduleDescription" rows="3" data-i18n-placeholder="module.desc.placeholder" placeholder="Optionale Beschreibung..."></textarea>
+            <div class="rich-text-editor" id="moduleDescEditorWrap">
+              <div class="rich-text-toolbar" id="moduleDescToolbar">
+                <button type="button" class="btn btn-secondary btn-sm" data-command="bold" title="Fett"><strong>B</strong></button>
+                <button type="button" class="btn btn-secondary btn-sm" data-command="italic" title="Kursiv"><em>I</em></button>
+                <button type="button" class="btn btn-secondary btn-sm" data-command="underline" title="Unterstreichen"><u>U</u></button>
+                <button type="button" class="btn btn-secondary btn-sm" data-command="insertUnorderedList" title="Aufzählung">• Liste</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-command="insertOrderedList" title="Nummerierte Liste">1. Liste</button>
+                <select id="moduleDescBlockFormat" class="setting-select rich-text-select" title="Absatzformat">
+                  <option value="P">Absatz</option>
+                  <option value="H1">Überschrift 1</option>
+                  <option value="H2">Überschrift 2</option>
+                  <option value="H3">Überschrift 3</option>
+                  <option value="BLOCKQUOTE">Zitat</option>
+                </select>
+                <select id="moduleDescFontSize" class="setting-select rich-text-select" title="Schriftgröße">
+                  <option value="2">Klein</option>
+                  <option value="3" selected>Normal</option>
+                  <option value="4">Groß</option>
+                  <option value="5">Sehr groß</option>
+                </select>
+                <button type="button" class="btn btn-secondary btn-sm" id="moduleDescInsertTable" title="Tabelle einfügen">▦ Tabelle</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="moduleDescCreateLink" title="Link einfügen">🔗 Link</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="moduleDescClearFormat" title="Formatierung entfernen">Tx</button>
+              </div>
+              <div id="moduleDescriptionEditor" class="rich-text-surface" contenteditable="true" role="textbox" aria-multiline="true"></div>
+              <textarea id="moduleDescription" class="hidden" rows="3" data-i18n-placeholder="module.desc.placeholder" placeholder="Optionale Beschreibung..."></textarea>
+            </div>
           </div>
           <div id="contentEditor" class="content-editor"></div>
           <div class="form-actions">
@@ -295,6 +329,18 @@
       </section>
 
     </main>
+  </div>
+
+  <!-- H5P export topic selector -->
+  <div id="exportH5pTopicOverlay" class="confirm-overlay hidden">
+    <div class="import-modules-card">
+      <h3>📦 Thema als H5P exportieren</h3>
+      <p class="import-modules-hint">Wähle ein Thema aus, das als H5P-Datei exportiert werden soll:</p>
+      <div id="exportH5pTopicList" class="import-modules-list"></div>
+      <div class="confirm-actions">
+        <button id="exportH5pBtnCancel" class="btn btn-secondary">Abbrechen</button>
+      </div>
+    </div>
   </div>
 
   <!-- Module import selection dialog -->

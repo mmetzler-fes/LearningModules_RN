@@ -21,6 +21,7 @@ const DB_FILE = path.join(DATA_DIR, 'database.json');
 const DEFAULT_DB = {
   admin: { username: 'admin', password: 'lehrer1' },
   topics: [],
+  examMode: false,
   results: [],
   studentSelectedTopics: {},
   nextResultId: 1,
@@ -42,6 +43,7 @@ function loadDB() {
   // Ensure all keys exist (migration from old format)
   if (!db.admin) db.admin = DEFAULT_DB.admin;
   if (!db.topics) db.topics = [];
+  if (typeof db.examMode !== 'boolean') db.examMode = false;
   if (!db.results) db.results = [];
   if (!db.studentSelectedTopics) db.studentSelectedTopics = {};
   if (!db.nextResultId) db.nextResultId = 1;
@@ -233,6 +235,46 @@ function inferImageExtFromDataUrl(dataUrl) {
   return { mime, ext: byMime[mime] || 'png' };
 }
 
+function resolveTopicImage(imageUrl, topicImages, prefix) {
+  if (!imageUrl) return { image: null, addedImages: {} };
+
+  if (imageUrl.startsWith('data:image/')) {
+    const { mime, ext } = inferImageExtFromDataUrl(imageUrl);
+    const fileName = `${prefix}-${h5pUuid()}.${ext}`;
+    return {
+      image: {
+        path: `images/${fileName}`,
+        mime,
+        copyright: { license: 'U' },
+      },
+      addedImages: { [fileName]: imageUrl },
+    };
+  }
+
+  const fileName = path.basename(imageUrl);
+  if (topicImages[fileName]) {
+    const { mime } = inferImageExtFromDataUrl(topicImages[fileName]);
+    return {
+      image: {
+        path: `images/${fileName}`,
+        mime,
+        copyright: { license: 'U' },
+      },
+      addedImages: {},
+    };
+  }
+
+  return { image: null, addedImages: {} };
+}
+
+function extractMediaImage(media, h5pImages) {
+  if (!media || typeof media !== 'object') return '';
+  const imagePath = media.path || (media.params && media.params.file && media.params.file.path) || '';
+  if (!imagePath) return '';
+  const fileName = path.basename(imagePath);
+  return h5pImages[fileName] || '';
+}
+
 function deepMergeObjects(base, patch) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return patch;
   const out = (base && typeof base === 'object' && !Array.isArray(base)) ? { ...base } : {};
@@ -413,12 +455,15 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
   if (mod.type === 'multipleChoice') {
     const content = mod.content || {};
     const answers = Array.isArray(content.answers) ? content.answers : [];
+    const { image, addedImages } = resolveTopicImage(content.imageUrl || '', topicImages, `mc-${mod.id || 'module'}`);
 
     return {
       question: buildQuestionWithSource(mod, 'H5P.MultiChoice', {
         library: 'H5P.MultiChoice 1.16',
         params: {
-          media: { disableImageZooming: false },
+          media: image
+            ? { type: { library: 'H5P.Image 1.1', params: { file: image } }, disableImageZooming: false }
+            : { disableImageZooming: false },
           question: `<p>${escapeHtmlForH5p(content.question || '')}</p>`,
           answers: answers.map((answer) => ({
             correct: !!answer.correct,
@@ -466,23 +511,27 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
         },
         subContentId: h5pUuid(),
       }),
-      addedImages: {},
+      addedImages,
     };
   }
 
   if (mod.type === 'trueFalse') {
     const content = mod.content || {};
-    const firstQuestion = Array.isArray(content.questions) && content.questions.length > 0
-      ? content.questions[0]
-      : {};
+    const tfQuestions = Array.isArray(content.questions) && content.questions.length > 0
+      ? content.questions
+      : [content];
+    const { image, addedImages } = resolveTopicImage(content.imageUrl || '', topicImages, `tf-${mod.id || 'module'}`);
+    const mediaObj = image
+      ? { type: { library: 'H5P.Image 1.1', params: { file: image } }, disableImageZooming: false }
+      : { disableImageZooming: false };
 
-    return {
-      question: buildQuestionWithSource(mod, 'H5P.TrueFalse', {
+    const questions = tfQuestions.map((q, idx) => {
+      return buildQuestionWithSource(mod, 'H5P.TrueFalse', {
         library: 'H5P.TrueFalse 1.8',
         params: {
-          media: { disableImageZooming: false },
-          question: `<p>${escapeHtmlForH5p(firstQuestion.question || '')}</p>`,
-          correct: (firstQuestion.correctAnswer || 'false') === 'true',
+          media: idx === 0 ? mediaObj : { disableImageZooming: false },
+          question: `<p>${escapeHtmlForH5p(q.question || '')}</p>`,
+          correct: (q.correctAnswer || 'false') === 'true',
           l10n: {
             trueText: 'True',
             falseText: 'False',
@@ -490,8 +539,8 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
             checkAnswer: 'Check',
             showSolutionButton: 'Show solution',
             tryAgain: 'Retry',
-            wrongAnswerMessage: firstQuestion.feedbackWrong || 'Wrong answer',
-            correctAnswerMessage: firstQuestion.feedbackCorrect || 'Correct answer',
+            wrongAnswerMessage: q.feedbackWrong || 'Wrong answer',
+            correctAnswerMessage: q.feedbackCorrect || 'Correct answer',
           },
           behaviour: {
             enableRetry: content.enableRetry !== false,
@@ -513,26 +562,33 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
         metadata: {
           contentType: 'True/False Question',
           license: 'U',
-          title: mod.title,
+          title: tfQuestions.length > 1 ? `${mod.title} (${idx + 1})` : mod.title,
           authors: [],
           changes: [],
-          extraTitle: mod.title,
+          extraTitle: tfQuestions.length > 1 ? `${mod.title} (${idx + 1})` : mod.title,
         },
         subContentId: h5pUuid(),
-      }),
-      addedImages: {},
+      });
+    });
+
+    return {
+      questions,
+      addedImages,
     };
   }
 
   if (mod.type === 'fillInTheBlanks') {
     const content = mod.content || {};
     const questions = Array.isArray(content.questions) ? content.questions : [];
+    const { image, addedImages } = resolveTopicImage(content.imageUrl || '', topicImages, `fib-${mod.id || 'module'}`);
 
     return {
       question: buildQuestionWithSource(mod, 'H5P.Blanks', {
         library: 'H5P.Blanks 1.14',
         params: {
-          media: { disableImageZooming: false },
+          media: image
+            ? { type: { library: 'H5P.Image 1.1', params: { file: image } }, disableImageZooming: false }
+            : { disableImageZooming: false },
           text: content.taskDescription ? `<p>${escapeHtmlForH5p(content.taskDescription)}</p>` : '',
           questions: questions.map((q) => `<p>${escapeHtmlForH5p(q.text || '')}</p>`),
           behaviour: {
@@ -583,17 +639,19 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
         },
         subContentId: h5pUuid(),
       }),
-      addedImages: {},
+      addedImages,
     };
   }
 
   if (mod.type === 'dragTheWords') {
     const content = mod.content || {};
+    const { image, addedImages } = resolveTopicImage(content.imageUrl || '', topicImages, `dtw-${mod.id || 'module'}`);
 
     return {
       question: buildQuestionWithSource(mod, 'H5P.DragText', {
         library: 'H5P.DragText 1.10',
         params: {
+          ...(image ? { media: { type: { library: 'H5P.Image 1.1', params: { file: image } }, disableImageZooming: false } } : {}),
           taskDescription: content.taskDescription ? `<p>${escapeHtmlForH5p(content.taskDescription)}</p>` : '',
           textField: content.textField || '',
           overallFeedback: [{ from: 0, to: 100, feedback: '' }],
@@ -617,17 +675,19 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
         },
         subContentId: h5pUuid(),
       }),
-      addedImages: {},
+      addedImages,
     };
   }
 
   if (mod.type === 'markTheWords') {
     const content = mod.content || {};
+    const { image, addedImages } = resolveTopicImage(content.imageUrl || '', topicImages, `mtw-${mod.id || 'module'}`);
 
     return {
       question: buildQuestionWithSource(mod, 'H5P.MarkTheWords', {
         library: 'H5P.MarkTheWords 1.11',
         params: {
+          ...(image ? { media: { type: { library: 'H5P.Image 1.1', params: { file: image } }, disableImageZooming: false } } : {}),
           taskDescription: content.taskDescription ? `<p>${escapeHtmlForH5p(content.taskDescription)}</p>` : '',
           textField: content.textField || '',
           overallFeedback: [{ from: 0, to: 100, feedback: '' }],
@@ -651,7 +711,7 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
         },
         subContentId: h5pUuid(),
       }),
-      addedImages: {},
+      addedImages,
     };
   }
 
@@ -758,12 +818,15 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
 
   if (mod.type === 'essay') {
     const content = mod.content || {};
+    const { image, addedImages } = resolveTopicImage(content.imageUrl || '', topicImages, `essay-${mod.id || 'module'}`);
 
     return {
       question: buildQuestionWithSource(mod, 'H5P.Essay', {
         library: 'H5P.Essay 1.5',
         params: {
-          media: { disableImageZooming: false },
+          media: image
+            ? { type: { library: 'H5P.Image 1.1', params: { file: image } }, disableImageZooming: false }
+            : { disableImageZooming: false },
           question: content.taskDescription ? `<p>${escapeHtmlForH5p(content.taskDescription)}</p>` : '',
           solution: {
             introduction: '',
@@ -795,7 +858,7 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
         },
         subContentId: h5pUuid(),
       }),
-      addedImages: {},
+      addedImages,
     };
   }
 
@@ -825,6 +888,7 @@ function convertH5pToNative(machineName, params, h5pImages = {}) {
         type: 'multipleChoice',
         content: {
           question,
+          imageUrl: extractMediaImage(params.media, h5pImages),
           answers,
           singleAnswer,
           randomAnswers: !!behaviour.randomAnswers,
@@ -844,6 +908,7 @@ function convertH5pToNative(machineName, params, h5pImages = {}) {
         type: 'fillInTheBlanks',
         content: {
           taskDescription,
+          imageUrl: extractMediaImage(params.media, h5pImages),
           questions: questions.length > 0 ? questions : [{ text: '' }],
           caseSensitive: !!(params.behaviour && params.behaviour.caseSensitive),
           enableRetry: !(params.behaviour && params.behaviour.enableRetry === false),
@@ -861,6 +926,7 @@ function convertH5pToNative(machineName, params, h5pImages = {}) {
       return {
         type: 'trueFalse',
         content: {
+          imageUrl: extractMediaImage(params.media, h5pImages),
           questions: [{ question, correctAnswer, feedbackCorrect, feedbackWrong }],
           enableRetry: !(params.behaviour && params.behaviour.enableRetry === false),
           enableSolutionsButton: !(params.behaviour && params.behaviour.enableSolutionsButton === false),
@@ -873,6 +939,7 @@ function convertH5pToNative(machineName, params, h5pImages = {}) {
         type: 'essay',
         content: {
           taskDescription: stripHtml(params.question || params.taskDescription || ''),
+          imageUrl: extractMediaImage(params.media, h5pImages),
           sampleSolution: (params.solution && params.solution.sample) || '',
           minChars: Number(params.behaviour && params.behaviour.minimumLength) || 0,
           inputFieldSize: Number(params.behaviour && params.behaviour.inputFieldSize) || 10,
@@ -888,6 +955,7 @@ function convertH5pToNative(machineName, params, h5pImages = {}) {
         type: 'dragTheWords',
         content: {
           taskDescription: stripHtml(params.taskDescription || ''),
+          imageUrl: extractMediaImage(params.media, h5pImages),
           textField: params.textField || '',
           enableRetry: !(params.behaviour && params.behaviour.enableRetry === false),
           enableSolutionsButton: !(params.behaviour && params.behaviour.enableSolutionsButton === false),
@@ -901,6 +969,7 @@ function convertH5pToNative(machineName, params, h5pImages = {}) {
         type: 'markTheWords',
         content: {
           taskDescription: stripHtml(params.taskDescription || ''),
+          imageUrl: extractMediaImage(params.media, h5pImages),
           textField: params.textField || '',
           enableRetry: !(params.behaviour && params.behaviour.enableRetry === false),
           enableSolutionsButton: !(params.behaviour && params.behaviour.enableSolutionsButton === false),
@@ -1058,6 +1127,12 @@ function startWebServer() {
     db.results.push(resultData);
     saveDB(db);
     res.json({ success: true, id: resultData.id });
+  });
+
+  // Exam mode endpoint for browser students
+  web.get('/api/exam-mode', (_req, res) => {
+    const db = loadDB();
+    res.json({ enabled: !!db.examMode });
   });
 
   // QR code endpoint — generates SVG dynamically
@@ -1242,6 +1317,18 @@ ipcMain.handle('toggle-topic-selection', (_event, topicId, selected) => {
     saveDB(db);
   }
   return { success: true };
+});
+
+ipcMain.handle('get-exam-mode', () => {
+  const db = loadDB();
+  return { enabled: !!db.examMode };
+});
+
+ipcMain.handle('set-exam-mode', (_event, enabled) => {
+  const db = loadDB();
+  db.examMode = !!enabled;
+  saveDB(db);
+  return { success: true, enabled: db.examMode };
 });
 
 // --- IPC: Modules CRUD (within a topic) ---
@@ -1736,9 +1823,12 @@ ipcMain.handle('export-topic-as-h5p', async (_event, topicId) => {
       const converted = convertNativeModuleToH5pQuestion(mod, topic.h5pImages || {});
       if (!converted) return null;
       Object.assign(exportImages, converted.addedImages || {});
+      // Some types (e.g. trueFalse) return multiple questions
+      if (converted.questions) return converted.questions;
       return converted.question;
     })
-    .filter(Boolean);
+    .filter(Boolean)
+    .flat();
 
   const h5pJson = {
     embedTypes: ['iframe'],
@@ -1777,6 +1867,112 @@ ipcMain.handle('export-topic-as-h5p', async (_event, topicId) => {
   } catch (e) {
     return { success: false, error: e.message };
   }
+});
+
+// --- IPC: Export selected modules individually as H5P ---
+
+ipcMain.handle('export-selected-modules-as-h5p', async (_event, topicId) => {
+  const db = loadDB();
+  const topic = db.topics.find((t) => t.id === topicId);
+  if (!topic) return { success: false, error: 'Thema nicht gefunden' };
+
+  if (topic.h5pImportMode === 'raw') {
+    return { success: false, error: 'RAW H5P-Projekte können nicht als einzelne Module exportiert werden.' };
+  }
+
+  const selectedModules = (topic.modules || []).filter((m) => m.moduleSelected !== false);
+  if (selectedModules.length === 0) {
+    return { success: false, error: 'Keine aktiven Module zum Exportieren vorhanden.' };
+  }
+
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: `H5P-Export: ${selectedModules.length} Modul(e) exportieren`,
+    properties: ['openDirectory', 'createDirectory'],
+    buttonLabel: 'Ordner wählen',
+  });
+  if (canceled || !filePaths || !filePaths[0]) return { success: false };
+
+  const exportDir = filePaths[0];
+  let exported = 0;
+  const errors = [];
+  const usedNames = new Set();
+
+  for (const mod of selectedModules) {
+    try {
+      const converted = convertNativeModuleToH5pQuestion(mod, topic.h5pImages || {});
+      if (!converted) {
+        errors.push(`"${mod.title}": Konvertierung fehlgeschlagen`);
+        continue;
+      }
+
+      // Some types (e.g. trueFalse) return multiple questions
+      const questionsToExport = converted.questions
+        ? converted.questions
+        : [converted.question];
+      const { addedImages } = converted;
+
+      for (const question of questionsToExport) {
+        const libraryStr = question.library || 'H5P.AdvancedText 1.1';
+        const parts = libraryStr.split(' ');
+        const machineName = parts[0];
+        const versionStr = parts[1] || '1.0';
+        const [majorStr, minorStr] = versionStr.split('.');
+        const majorVersion = parseInt(majorStr, 10) || 1;
+        const minorVersion = parseInt(minorStr, 10) || 0;
+
+        const exportTitle = (question.metadata && question.metadata.title) || mod.title;
+
+        const h5pJson = {
+          embedTypes: ['iframe'],
+          language: 'de',
+          title: exportTitle,
+          mainLibrary: machineName,
+          license: 'U',
+          defaultLanguage: 'de',
+          preloadedDependencies: [{ machineName, majorVersion, minorVersion }],
+          extraTitle: exportTitle,
+        };
+
+        const contentJson = question.params || {};
+
+        // Unique, safe file name
+        let baseName = (exportTitle || 'modul').replace(/[^\w\säöüÄÖÜß-]/g, '_').trim() || 'modul';
+        let fileName = `${baseName}.h5p`;
+        let counter = 1;
+        while (usedNames.has(fileName.toLowerCase())) {
+          fileName = `${baseName}_${counter++}.h5p`;
+        }
+        usedNames.add(fileName.toLowerCase());
+
+        const filePath = path.join(exportDir, fileName);
+        const zipFiles = {
+          'h5p.json':              Buffer.from(JSON.stringify(h5pJson,    null, 2), 'utf8'),
+          'content/content.json':  Buffer.from(JSON.stringify(contentJson, null, 2), 'utf8'),
+        };
+
+        const allImages = { ...(topic.h5pImages || {}), ...(addedImages || {}) };
+        for (const [imgName, dataUrl] of Object.entries(allImages)) {
+          if (!dataUrl) continue;
+          const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+          if (b64) zipFiles[`content/images/${imgName}`] = Buffer.from(b64, 'base64');
+        }
+
+        fs.writeFileSync(filePath, createZip(zipFiles));
+        exported++;
+      }
+    } catch (e) {
+      errors.push(`"${mod.title}": ${e.message}`);
+    }
+  }
+
+  return {
+    success: exported > 0,
+    exported,
+    total: selectedModules.length,
+    exportDir,
+    errors: errors.length > 0 ? errors : undefined,
+    error: exported === 0 ? (errors[0] || 'Keine Module exportiert.') : undefined,
+  };
 });
 
 // --- App lifecycle ---

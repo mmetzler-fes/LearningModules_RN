@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('api', {
 
   // Topics CRUD
   getTopics: () => ipcRenderer.invoke('get-topics'),
+  getExamMode: () => ipcRenderer.invoke('get-exam-mode'),
+  setExamMode: (enabled) => ipcRenderer.invoke('set-exam-mode', enabled),
   saveTopic: (topicData) => ipcRenderer.invoke('save-topic', topicData),
   deleteTopic: (topicId) => ipcRenderer.invoke('delete-topic', topicId),
   toggleTopicSelection: (topicId, selected) => ipcRenderer.invoke('toggle-topic-selection', topicId, selected),
@@ -27,6 +29,7 @@ contextBridge.exposeInMainWorld('api', {
   // H5P import/export
   importH5p: (options) => ipcRenderer.invoke('import-h5p', options),
   exportTopicAsH5p: (topicId) => ipcRenderer.invoke('export-topic-as-h5p', topicId),
+  exportSelectedModulesAsH5p: (topicId) => ipcRenderer.invoke('export-selected-modules-as-h5p', topicId),
 
   // Student selections
   getSelectedTopics: () => ipcRenderer.invoke('get-selected-topics'),
