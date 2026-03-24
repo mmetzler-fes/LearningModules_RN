@@ -61,6 +61,7 @@ let currentTopicRawSummary = null;
 let editingModuleId = null;
 let editingTopicId = null;
 let contentEditor = null;
+let moduleDescEditorInitialized = false;
 
 // Quiz state
 let quizState = null; // { topicId, modules, currentIndex, answers, startTime }
@@ -136,6 +137,13 @@ const moduleIdInput = document.getElementById('moduleId');
 const moduleTitleInput = document.getElementById('moduleTitle');
 const moduleTypeSelect = document.getElementById('moduleType');
 const moduleDescInput = document.getElementById('moduleDescription');
+const moduleDescToolbar = document.getElementById('moduleDescToolbar');
+const moduleDescEditor = document.getElementById('moduleDescriptionEditor');
+const moduleDescBlockFormat = document.getElementById('moduleDescBlockFormat');
+const moduleDescFontSize = document.getElementById('moduleDescFontSize');
+const moduleDescInsertTable = document.getElementById('moduleDescInsertTable');
+const moduleDescCreateLink = document.getElementById('moduleDescCreateLink');
+const moduleDescClearFormat = document.getElementById('moduleDescClearFormat');
 const contentEditorEl = document.getElementById('contentEditor');
 const createViewTitle = document.getElementById('createViewTitle');
 const btnCancelModule = document.getElementById('btnCancelModule');
@@ -193,6 +201,150 @@ function appConfirm(message) {
     confirmBtnYes.addEventListener('click', onYes);
     confirmBtnNo.addEventListener('click', onNo);
   });
+}
+
+function escapeHtmlPreservingText(text) {
+  return escapeHtml(String(text || '')).replace(/\n/g, '<br>');
+}
+
+function sanitizeModuleDescriptionHtml(html) {
+  const allowedTags = new Set(['P', 'BR', 'B', 'STRONG', 'I', 'EM', 'U', 'S', 'UL', 'OL', 'LI', 'H1', 'H2', 'H3', 'BLOCKQUOTE', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD', 'A', 'SPAN', 'FONT']);
+  const template = document.createElement('template');
+  template.innerHTML = html || '';
+
+  const sanitizeNode = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return document.createTextNode(node.textContent || '');
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return document.createDocumentFragment();
+    }
+
+    const tag = node.tagName.toUpperCase();
+    const fragment = document.createDocumentFragment();
+
+    if (!allowedTags.has(tag)) {
+      Array.from(node.childNodes).forEach((child) => {
+        fragment.appendChild(sanitizeNode(child));
+      });
+      return fragment;
+    }
+
+    const clean = document.createElement(tag.toLowerCase());
+
+    if (tag === 'A') {
+      const href = node.getAttribute('href') || '';
+      if (/^(https?:|mailto:|#)/i.test(href)) {
+        clean.setAttribute('href', href);
+        clean.setAttribute('target', '_blank');
+        clean.setAttribute('rel', 'noopener noreferrer');
+      }
+    }
+
+    if (tag === 'TH' || tag === 'TD') {
+      const colspan = node.getAttribute('colspan');
+      const rowspan = node.getAttribute('rowspan');
+      if (colspan && /^\d+$/.test(colspan)) clean.setAttribute('colspan', colspan);
+      if (rowspan && /^\d+$/.test(rowspan)) clean.setAttribute('rowspan', rowspan);
+    }
+
+    if (tag === 'FONT') {
+      const size = node.getAttribute('size');
+      if (size && /^[1-7]$/.test(size)) clean.setAttribute('size', size);
+    }
+
+    const style = node.getAttribute('style') || '';
+    const textAlignMatch = style.match(/text-align\s*:\s*(left|center|right|justify)/i);
+    if (textAlignMatch && ['P', 'H1', 'H2', 'H3', 'BLOCKQUOTE', 'TH', 'TD', 'SPAN'].includes(tag)) {
+      clean.style.textAlign = textAlignMatch[1].toLowerCase();
+    }
+
+    Array.from(node.childNodes).forEach((child) => {
+      clean.appendChild(sanitizeNode(child));
+    });
+
+    return clean;
+  };
+
+  const out = document.createElement('div');
+  Array.from(template.content.childNodes).forEach((child) => {
+    out.appendChild(sanitizeNode(child));
+  });
+
+  return out.innerHTML;
+}
+
+function getModuleDescriptionHtml() {
+  return sanitizeModuleDescriptionHtml(moduleDescEditor ? moduleDescEditor.innerHTML : moduleDescInput.value || '');
+}
+
+function setModuleDescriptionHtml(value) {
+  const hasMarkup = /<\/?[a-z][\s\S]*>/i.test(value || '');
+  const html = hasMarkup ? sanitizeModuleDescriptionHtml(value || '') : escapeHtmlPreservingText(value || '');
+  if (moduleDescEditor) {
+    moduleDescEditor.innerHTML = html;
+  }
+  if (moduleDescInput) {
+    moduleDescInput.value = html;
+  }
+}
+
+function syncModuleDescriptionInput() {
+  if (moduleDescInput) {
+    moduleDescInput.value = getModuleDescriptionHtml();
+  }
+}
+
+function applyModuleDescriptionCommand(command, value = null) {
+  if (!moduleDescEditor) return;
+  moduleDescEditor.focus();
+  document.execCommand(command, false, value);
+  syncModuleDescriptionInput();
+}
+
+function initModuleDescriptionEditor() {
+  if (!moduleDescEditor || !moduleDescToolbar) return;
+  if (moduleDescEditorInitialized) return;
+  moduleDescEditorInitialized = true;
+
+  moduleDescToolbar.querySelectorAll('[data-command]').forEach((button) => {
+    button.addEventListener('click', () => {
+      applyModuleDescriptionCommand(button.dataset.command);
+    });
+  });
+
+  moduleDescBlockFormat.addEventListener('change', () => {
+    applyModuleDescriptionCommand('formatBlock', moduleDescBlockFormat.value);
+  });
+
+  moduleDescFontSize.addEventListener('change', () => {
+    applyModuleDescriptionCommand('fontSize', moduleDescFontSize.value);
+  });
+
+  moduleDescInsertTable.addEventListener('click', () => {
+    moduleDescEditor.focus();
+    const tableHtml = '<table><thead><tr><th>Spalte 1</th><th>Spalte 2</th></tr></thead><tbody><tr><td>Inhalt</td><td>Inhalt</td></tr><tr><td>Inhalt</td><td>Inhalt</td></tr></tbody></table><p></p>';
+    document.execCommand('insertHTML', false, tableHtml);
+    syncModuleDescriptionInput();
+  });
+
+  moduleDescCreateLink.addEventListener('click', () => {
+    const url = prompt('Link-URL eingeben:', 'https://');
+    if (!url) return;
+    applyModuleDescriptionCommand('createLink', url.trim());
+  });
+
+  moduleDescClearFormat.addEventListener('click', () => {
+    applyModuleDescriptionCommand('removeFormat');
+  });
+
+  moduleDescEditor.addEventListener('input', syncModuleDescriptionInput);
+  moduleDescEditor.addEventListener('blur', () => {
+    setModuleDescriptionHtml(getModuleDescriptionHtml());
+  });
+
+  setModuleDescriptionHtml('');
 }
 
 // ==================== LOGIN ====================
@@ -354,6 +506,7 @@ async function refreshTeacherDashboard() {
   statActive.textContent = topics.filter((t) => t.selected).length;
   const results = await appApi.getQuizResults();
   statResults.textContent = results.length;
+  initModuleDescriptionEditor();
   renderTypeGrid();
 }
 
@@ -862,7 +1015,7 @@ moduleForm.addEventListener('submit', async (e) => {
 
   const title = moduleTitleInput.value.trim();
   const type = moduleTypeSelect.value;
-  const description = moduleDescInput.value.trim();
+  const description = getModuleDescriptionHtml().trim();
 
   if (!title || !type) {
     showToast(t('module.missing.fields'), 'error');
@@ -909,7 +1062,7 @@ function resetModuleForm() {
   moduleIdInput.value = '';
   moduleTitleInput.value = '';
   moduleTypeSelect.value = '';
-  moduleDescInput.value = '';
+  setModuleDescriptionHtml('');
   contentEditor.clear();
   createViewTitle.textContent = t('module.create.title');
 }
@@ -920,7 +1073,7 @@ function openModuleEditor(mod) {
   moduleIdInput.value = mod.id;
   moduleTitleInput.value = mod.title;
   moduleTypeSelect.value = mod.type;
-  moduleDescInput.value = mod.description || '';
+  setModuleDescriptionHtml(mod.description || '');
   navigateToView('create-module');
   contentEditor.render(mod.type, mod.content || {});
 }
@@ -1463,10 +1616,11 @@ function renderH5pPreview(mod, typeDef, container) {
   wrapper.appendChild(header);
 
   if (mod.description) {
-    const desc = document.createElement('p');
+    const desc = document.createElement('div');
+    desc.className = 'module-description-content';
     desc.style.marginBottom = '20px';
     desc.style.color = 'var(--text-secondary)';
-    desc.textContent = mod.description;
+    desc.innerHTML = sanitizeModuleDescriptionHtml(mod.description);
     wrapper.appendChild(desc);
   }
 

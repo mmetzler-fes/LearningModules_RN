@@ -226,7 +226,33 @@
           </div>
           <div class="form-group">
             <label for="moduleDescription" data-i18n="module.desc.label">Beschreibung</label>
-            <textarea id="moduleDescription" rows="3" data-i18n-placeholder="module.desc.placeholder" placeholder="Optionale Beschreibung..."></textarea>
+            <div class="rich-text-editor" id="moduleDescEditorWrap">
+              <div class="rich-text-toolbar" id="moduleDescToolbar">
+                <button type="button" class="btn btn-secondary btn-sm" data-command="bold" title="Fett"><strong>B</strong></button>
+                <button type="button" class="btn btn-secondary btn-sm" data-command="italic" title="Kursiv"><em>I</em></button>
+                <button type="button" class="btn btn-secondary btn-sm" data-command="underline" title="Unterstreichen"><u>U</u></button>
+                <button type="button" class="btn btn-secondary btn-sm" data-command="insertUnorderedList" title="Aufzählung">• Liste</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-command="insertOrderedList" title="Nummerierte Liste">1. Liste</button>
+                <select id="moduleDescBlockFormat" class="setting-select rich-text-select" title="Absatzformat">
+                  <option value="P">Absatz</option>
+                  <option value="H1">Überschrift 1</option>
+                  <option value="H2">Überschrift 2</option>
+                  <option value="H3">Überschrift 3</option>
+                  <option value="BLOCKQUOTE">Zitat</option>
+                </select>
+                <select id="moduleDescFontSize" class="setting-select rich-text-select" title="Schriftgröße">
+                  <option value="2">Klein</option>
+                  <option value="3" selected>Normal</option>
+                  <option value="4">Groß</option>
+                  <option value="5">Sehr groß</option>
+                </select>
+                <button type="button" class="btn btn-secondary btn-sm" id="moduleDescInsertTable" title="Tabelle einfügen">▦ Tabelle</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="moduleDescCreateLink" title="Link einfügen">🔗 Link</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="moduleDescClearFormat" title="Formatierung entfernen">Tx</button>
+              </div>
+              <div id="moduleDescriptionEditor" class="rich-text-surface" contenteditable="true" role="textbox" aria-multiline="true"></div>
+              <textarea id="moduleDescription" class="hidden" rows="3" data-i18n-placeholder="module.desc.placeholder" placeholder="Optionale Beschreibung..."></textarea>
+            </div>
           </div>
           <div id="contentEditor" class="content-editor"></div>
           <div class="form-actions">
