@@ -32,6 +32,7 @@
   "build": {
     "appId": "com.learningmodules.app",
     "productName": "LearningModules",
+    "icon": "assets/icons/icon.png",
     "directories": {
       "output": "dist"
     },
@@ -45,12 +46,14 @@
         "AppImage",
         "deb"
       ],
+      "icon": "assets/icons/",
       "category": "Education"
     },
     "win": {
       "target": [
         "nsis"
       ],
+      "icon": "assets/icons/icon.ico",
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "mac": {
