@@ -1771,7 +1771,15 @@ function createTypePreview(type, content, options = {}) {
     }
     case 'trueFalse': {
       // Support old flat format (single question) and new list format
-      const tfQuestions = content.questions || [content];
+      let tfQuestions = content.questions || [content];
+      if (content.randomOrder) {
+        // Shuffle questions (Fisher-Yates)
+        tfQuestions = [...tfQuestions];
+        for (let i = tfQuestions.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [tfQuestions[i], tfQuestions[j]] = [tfQuestions[j], tfQuestions[i]];
+        }
+      }
       if (tfQuestions.length === 0) { div.textContent = 'Keine Fragen definiert.'; break; }
 
       let tfIdx = 0;
