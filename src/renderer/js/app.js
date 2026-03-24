@@ -550,9 +550,53 @@ function renderTypeGrid() {
 // ==================== TEACHER: TOPICS ====================
 
 async function refreshTopicsList() {
+
   await loadTopics();
   topicsList.innerHTML = '';
   topicFormContainer.classList.add('hidden');
+
+  // Select/Deselect All Checkboxen einfügen
+  if (topics.length > 0) {
+    const selectAllRow = document.createElement('div');
+    selectAllRow.style.display = 'flex';
+    selectAllRow.style.justifyContent = 'flex-end';
+    selectAllRow.style.gap = '12px';
+    selectAllRow.style.marginBottom = '10px';
+
+    const selectAllBtn = document.createElement('button');
+    selectAllBtn.className = 'btn btn-secondary btn-sm';
+    selectAllBtn.textContent = 'Alle auswählen';
+    selectAllBtn.title = 'Alle Lernthemen aktivieren';
+
+    const deselectAllBtn = document.createElement('button');
+    deselectAllBtn.className = 'btn btn-secondary btn-sm';
+    deselectAllBtn.textContent = 'Alle abwählen';
+    deselectAllBtn.title = 'Alle Lernthemen deaktivieren';
+
+    selectAllBtn.addEventListener('click', async () => {
+      for (const topic of topics) {
+        if (!topic.selected) {
+          await appApi.toggleTopicSelection(topic.id, true);
+        }
+      }
+      showToast('Alle Lernthemen aktiviert', 'info');
+      refreshTopicsList();
+    });
+
+    deselectAllBtn.addEventListener('click', async () => {
+      for (const topic of topics) {
+        if (topic.selected) {
+          await appApi.toggleTopicSelection(topic.id, false);
+        }
+      }
+      showToast('Alle Lernthemen deaktiviert', 'info');
+      refreshTopicsList();
+    });
+
+    selectAllRow.appendChild(selectAllBtn);
+    selectAllRow.appendChild(deselectAllBtn);
+    topicsList.appendChild(selectAllRow);
+  }
 
   if (topics.length === 0) {
     topicsList.innerHTML = `
@@ -872,6 +916,51 @@ async function refreshModulesList() {
       : `<span class="empty-icon">🔍</span><p>Keine Module gefunden.</p>`;
     modulesList.appendChild(empty);
     return;
+  }
+
+  // Select/Deselect All Buttons einfügen
+  if (filtered.length > 0) {
+    const selectAllRow = document.createElement('div');
+    selectAllRow.style.display = 'flex';
+    selectAllRow.style.justifyContent = 'flex-end';
+    selectAllRow.style.gap = '12px';
+    selectAllRow.style.marginBottom = '10px';
+
+    const selectAllBtn = document.createElement('button');
+    selectAllBtn.className = 'btn btn-secondary btn-sm';
+    selectAllBtn.textContent = 'Alle auswählen';
+    selectAllBtn.title = 'Alle Module aktivieren';
+
+    const deselectAllBtn = document.createElement('button');
+    deselectAllBtn.className = 'btn btn-secondary btn-sm';
+    deselectAllBtn.textContent = 'Alle abwählen';
+    deselectAllBtn.title = 'Alle Module deaktivieren';
+
+    selectAllBtn.addEventListener('click', async () => {
+      for (const mod of filtered) {
+        if (mod.moduleSelected === false) {
+          await appApi.toggleModuleSelection(currentTopicId, mod.id, true);
+          mod.moduleSelected = true;
+        }
+      }
+      showToast('Alle Module aktiviert', 'info');
+      refreshModulesList();
+    });
+
+    deselectAllBtn.addEventListener('click', async () => {
+      for (const mod of filtered) {
+        if (mod.moduleSelected !== false) {
+          await appApi.toggleModuleSelection(currentTopicId, mod.id, false);
+          mod.moduleSelected = false;
+        }
+      }
+      showToast('Alle Module deaktiviert', 'info');
+      refreshModulesList();
+    });
+
+    selectAllRow.appendChild(selectAllBtn);
+    selectAllRow.appendChild(deselectAllBtn);
+    modulesList.appendChild(selectAllRow);
   }
 
   for (const mod of filtered) {
