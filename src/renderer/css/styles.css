@@ -1792,6 +1792,35 @@ body {
   filter: none;
 }
 
+/* ===== Module Drag Reorder ===== */
+.module-drag-handle {
+  font-size: 1.3rem;
+  cursor: grab;
+  color: var(--text-secondary);
+  user-select: none;
+  flex-shrink: 0;
+  padding: 4px 2px;
+  line-height: 1;
+  transition: color var(--transition);
+}
+
+.module-drag-handle:hover {
+  color: var(--accent);
+}
+
+.module-drag-handle:active {
+  cursor: grabbing;
+}
+
+.module-card.dragging {
+  opacity: 0.4;
+  border-style: dashed;
+}
+
+.module-card.drag-over {
+  border-top: 3px solid var(--accent);
+}
+
 /* ===== Import Modules Modal ===== */
 .import-modules-card {
   background: var(--bg-secondary);

@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   saveModule: (topicId, moduleData) => ipcRenderer.invoke('save-module', topicId, moduleData),
   deleteModule: (topicId, moduleId) => ipcRenderer.invoke('delete-module', topicId, moduleId),
   toggleModuleSelection: (topicId, moduleId, selected) => ipcRenderer.invoke('toggle-module-selection', topicId, moduleId, selected),
+  reorderModules: (topicId, moduleIds) => ipcRenderer.invoke('reorder-modules', topicId, moduleIds),
 
   // Export/Import
   exportTopic: (topicId) => ipcRenderer.invoke('export-topic', topicId),

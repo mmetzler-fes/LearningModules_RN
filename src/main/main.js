@@ -1379,6 +1379,20 @@ ipcMain.handle('toggle-module-selection', (_event, topicId, moduleId, selected) 
   return { success: true };
 });
 
+ipcMain.handle('reorder-modules', (_event, topicId, moduleIds) => {
+  const db = loadDB();
+  const topic = db.topics.find((t) => t.id === topicId);
+  if (!topic) return { success: false };
+  const oldModules = topic.modules || [];
+  const byId = Object.fromEntries(oldModules.map((m) => [m.id, m]));
+  topic.modules = moduleIds.map((id) => byId[id]).filter(Boolean);
+  // Append any modules not in the new order (safety net)
+  const idSet = new Set(moduleIds);
+  oldModules.filter((m) => !idSet.has(m.id)).forEach((m) => topic.modules.push(m));
+  saveDB(db);
+  return { success: true };
+});
+
 // --- IPC: Export/Import (per topic) ---
 
 ipcMain.handle('export-topic', async (_event, topicId) => {

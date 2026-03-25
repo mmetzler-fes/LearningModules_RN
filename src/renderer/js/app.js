@@ -33,6 +33,7 @@ const browserApi = {
   saveModule: () => Promise.resolve({ success: false }),
   deleteModule: () => Promise.resolve({ success: false }),
   toggleModuleSelection: () => Promise.resolve({ success: false }),
+  reorderModules: () => Promise.resolve({ success: false }),
   exportTopic: () => Promise.resolve({ success: false }),
   importTopic: () => Promise.resolve({ success: false }),
   importModulesToTopic: () => Promise.resolve(null),
@@ -963,12 +964,18 @@ async function refreshModulesList() {
     modulesList.appendChild(selectAllRow);
   }
 
+  // Enable drag reorder only when no search/filter is active
+  const canReorder = !search && !typeFilter;
+  let dragSrcCard = null;
+
   for (const mod of filtered) {
     const typeDef = H5P_TYPES[mod.type] || {};
     const isSelected = mod.moduleSelected !== false;
     const card = document.createElement('div');
     card.className = `module-card ${isSelected ? '' : 'module-card-disabled'}`;
+    card.dataset.moduleId = mod.id;
     card.innerHTML = `
+      ${canReorder ? '<div class="module-drag-handle" title="Reihenfolge ändern">☰</div>' : ''}
       <input type="checkbox" class="module-select-checkbox" title="Modul für Schüler aktivieren" ${isSelected ? 'checked' : ''} />
       <div class="module-card-icon">${typeDef.icon || '📦'}</div>
       <div class="module-card-info">
@@ -984,6 +991,52 @@ async function refreshModulesList() {
         <button class="btn btn-danger btn-sm btn-delete" title="Löschen">🗑</button>
       </div>
     `;
+
+    // --- Drag-and-Drop reordering ---
+    if (canReorder) {
+      const handle = card.querySelector('.module-drag-handle');
+      handle.addEventListener('mousedown', () => { card.draggable = true; });
+      card.addEventListener('dragstart', (e) => {
+        dragSrcCard = card;
+        card.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', mod.id);
+      });
+      card.addEventListener('dragend', () => {
+        card.draggable = false;
+        card.classList.remove('dragging');
+        dragSrcCard = null;
+        modulesList.querySelectorAll('.module-card').forEach((c) => c.classList.remove('drag-over'));
+      });
+      card.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (dragSrcCard && dragSrcCard !== card) {
+          modulesList.querySelectorAll('.module-card').forEach((c) => c.classList.remove('drag-over'));
+          card.classList.add('drag-over');
+        }
+      });
+      card.addEventListener('dragleave', () => {
+        card.classList.remove('drag-over');
+      });
+      card.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        card.classList.remove('drag-over');
+        if (!dragSrcCard || dragSrcCard === card) return;
+        // Move the dragged card before or after the drop target
+        const cards = [...modulesList.querySelectorAll('.module-card')];
+        const srcIdx = cards.indexOf(dragSrcCard);
+        const dstIdx = cards.indexOf(card);
+        if (srcIdx < dstIdx) {
+          card.after(dragSrcCard);
+        } else {
+          card.before(dragSrcCard);
+        }
+        // Persist new order
+        const newOrder = [...modulesList.querySelectorAll('.module-card[data-module-id]')].map((c) => c.dataset.moduleId);
+        await appApi.reorderModules(currentTopicId, newOrder);
+      });
+    }
 
     card.querySelector('.module-select-checkbox').addEventListener('change', async (e) => {
       await appApi.toggleModuleSelection(currentTopicId, mod.id, e.target.checked);
