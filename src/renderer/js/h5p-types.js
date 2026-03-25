@@ -140,7 +140,7 @@ const H5P_TYPES = {
     category: 'Interaktiv',
     editorType: 'dragAndDrop',
     fields: [
-      { key: 'taskDescription', type: 'textarea', label: 'Aufgabenbeschreibung' },
+      { key: 'taskDescription', type: 'richtext', label: 'Aufgabenbeschreibung' },
       { key: 'backgroundImage', type: 'text', label: 'Hintergrundbild' },
       { key: 'dropZones', type: 'list', label: 'Ablagezonen', itemFields: [
         { key: 'label', type: 'text', label: 'Zonenbezeichnung', required: true },
@@ -162,7 +162,7 @@ const H5P_TYPES = {
     description: 'Wörter in Lücken eines Textes ziehen.',
     category: 'Sprache',
     fields: [
-      { key: 'taskDescription', type: 'textarea', label: 'Aufgabenbeschreibung' },
+      { key: 'taskDescription', type: 'richtext', label: 'Aufgabenbeschreibung' },
       { key: 'imageUrl', type: 'image', label: 'Bild (optional)' },
       { key: 'textField', type: 'textarea', label: 'Text (ziehbare Wörter mit *Sternchen* markieren)', required: true,
         placeholder: 'Die *Sonne* scheint am *Himmel*.' },
@@ -195,7 +195,7 @@ const H5P_TYPES = {
     description: 'Lückentext-Aufgaben zum Ausfüllen.',
     category: 'Sprache',
     fields: [
-      { key: 'taskDescription', type: 'textarea', label: 'Aufgabenbeschreibung' },
+      { key: 'taskDescription', type: 'richtext', label: 'Aufgabenbeschreibung' },
       { key: 'imageUrl', type: 'image', label: 'Bild (optional)' },
       { key: 'questions', type: 'list', label: 'Sätze mit Lücken', itemFields: [
         { key: 'text', type: 'text', label: 'Satz (Lücken mit *Antwort* markieren)', required: true,
@@ -256,7 +256,7 @@ const H5P_TYPES = {
     description: 'Korrekte Wörter in einem Text markieren.',
     category: 'Sprache',
     fields: [
-      { key: 'taskDescription', type: 'textarea', label: 'Aufgabenbeschreibung' },
+      { key: 'taskDescription', type: 'richtext', label: 'Aufgabenbeschreibung' },
       { key: 'imageUrl', type: 'image', label: 'Bild (optional)' },
       { key: 'textField', type: 'textarea', label: 'Text (korrekte Wörter mit *Sternchen* markieren)', required: true,
         placeholder: 'Markiere alle *Nomen*: Der *Hund* liegt auf dem *Sofa*.' },
@@ -271,7 +271,7 @@ const H5P_TYPES = {
     description: 'Fragen mit mehreren Antwortmöglichkeiten.',
     category: 'Quiz',
     fields: [
-      { key: 'question', type: 'textarea', label: 'Frage', required: true },
+      { key: 'question', type: 'richtext', label: 'Frage', required: true },
       { key: 'imageUrl', type: 'image', label: 'Bild (optional)' },
       { key: 'answers', type: 'list', label: 'Antworten', itemFields: [
         { key: 'text', type: 'text', label: 'Antworttext', required: true },

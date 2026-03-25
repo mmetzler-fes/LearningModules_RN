@@ -91,6 +91,9 @@ class ContentEditorManager {
       case 'textarea':
         this.renderTextareaField(parent, field, value);
         break;
+      case 'richtext':
+        this.renderRichtextField(parent, field, value);
+        break;
       case 'number':
         this.renderNumberField(parent, field, value);
         break;
@@ -265,6 +268,73 @@ class ContentEditorManager {
     parent.appendChild(group);
   }
 
+  renderRichtextField(parent, field, value) {
+    const group = this.createFormGroup(field.label, field.required);
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'rich-text-editor';
+
+    // Toolbar
+    const toolbar = document.createElement('div');
+    toolbar.className = 'rich-text-toolbar';
+    const cmds = [
+      { cmd: 'bold', icon: 'B', title: 'Fett', style: 'font-weight:bold;' },
+      { cmd: 'italic', icon: 'I', title: 'Kursiv', style: 'font-style:italic;' },
+      { cmd: 'underline', icon: 'U', title: 'Unterstrichen', style: 'text-decoration:underline;' },
+      { cmd: 'strikeThrough', icon: 'S', title: 'Durchgestrichen', style: 'text-decoration:line-through;' },
+    ];
+    for (const c of cmds) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-secondary btn-sm';
+      btn.innerHTML = `<span style="${c.style}">${c.icon}</span>`;
+      btn.title = c.title;
+      btn.addEventListener('click', () => {
+        editor.focus();
+        document.execCommand(c.cmd, false, null);
+      });
+      toolbar.appendChild(btn);
+    }
+    // Clear format button
+    const btnClear = document.createElement('button');
+    btnClear.type = 'button';
+    btnClear.className = 'btn btn-secondary btn-sm';
+    btnClear.textContent = 'T\u2093';
+    btnClear.title = 'Formatierung entfernen';
+    btnClear.addEventListener('click', () => {
+      editor.focus();
+      document.execCommand('removeFormat', false, null);
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        document.execCommand('formatBlock', false, 'p');
+      }
+    });
+    toolbar.appendChild(btnClear);
+    wrapper.appendChild(toolbar);
+
+    // Editable area
+    const editor = document.createElement('div');
+    editor.className = 'rich-text-surface';
+    editor.contentEditable = 'true';
+    editor.dataset.fieldKey = field.key;
+    const hasMarkup = /<\/?[a-z][\s\S]*>/i.test(value || '');
+    editor.innerHTML = hasMarkup ? (value || '') : escapeHtmlPreservingText(value || '');
+    if (field.placeholder) editor.dataset.placeholder = field.placeholder;
+
+    // Hidden input to hold the HTML value for collectData
+    const hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.name = `content_${field.key}`;
+    hidden.value = value || '';
+    editor.addEventListener('input', () => { hidden.value = editor.innerHTML; });
+    editor.addEventListener('blur', () => { hidden.value = editor.innerHTML; });
+
+    wrapper.appendChild(editor);
+    group.appendChild(wrapper);
+    group.appendChild(hidden);
+    parent.appendChild(group);
+  }
+
   renderNumberField(parent, field, value) {
     const group = this.createFormGroup(field.label, field.required);
     const input = document.createElement('input');
@@ -430,6 +500,7 @@ class ContentEditorManager {
     switch (field.type) {
       case 'text':
       case 'textarea':
+      case 'richtext':
       case 'number':
       case 'select':
       case 'image':
@@ -531,15 +602,8 @@ class ContentEditorManager {
     heading.textContent = `${typeDef.icon} ${typeDef.name} — Inhalt konfigurieren`;
     this.container.appendChild(heading);
 
-    // Task description
-    const descGroup = this.createFormGroup('Aufgabenbeschreibung');
-    const descArea = document.createElement('textarea');
-    descArea.id = 'dnd-editor-desc';
-    descArea.rows = 3;
-    descArea.value = data.taskDescription || '';
-    descArea.placeholder = 'Beschreibe die Aufgabe für die Schüler...';
-    descGroup.appendChild(descArea);
-    this.container.appendChild(descGroup);
+    // Task description (rich text)
+    this.renderRichtextField(this.container, { key: 'dnd_taskDescription', label: 'Aufgabenbeschreibung', type: 'richtext' }, data.taskDescription || '');
 
     // Background image section
     const imgGroup = this.createFormGroup('Hintergrundbild *');
@@ -1005,9 +1069,10 @@ class ContentEditorManager {
   }
 
   collectDragAndDropData() {
-    const desc = this.container.querySelector('#dnd-editor-desc');
+    const descHidden = this.container.querySelector('[name="content_dnd_taskDescription"]');
+    const descFallback = this.container.querySelector('#dnd-editor-desc');
     return {
-      taskDescription: desc ? desc.value : '',
+      taskDescription: descHidden ? descHidden.value : (descFallback ? descFallback.value : ''),
       backgroundImage: this.dndState.backgroundImage,
       dropZones: this.dndState.dropZones.map((z) => ({
         label: z.label,

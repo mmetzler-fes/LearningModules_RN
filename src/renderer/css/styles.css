@@ -1812,6 +1812,16 @@ body {
   cursor: grabbing;
 }
 
+.module-card-number {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  min-width: 1.8em;
+  text-align: right;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
 .module-card.dragging {
   opacity: 0.4;
   border-style: dashed;

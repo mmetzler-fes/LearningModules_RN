@@ -341,7 +341,16 @@ function initModuleDescriptionEditor() {
   });
 
   moduleDescClearFormat.addEventListener('click', () => {
-    applyModuleDescriptionCommand('removeFormat');
+    if (!moduleDescEditor) return;
+    moduleDescEditor.focus();
+    // Remove inline formatting (bold, italic, underline, etc.)
+    document.execCommand('removeFormat', false, null);
+    // Also reset block-level formatting (headers, blockquotes) to plain paragraphs
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      document.execCommand('formatBlock', false, 'p');
+    }
+    syncModuleDescriptionInput();
   });
 
   moduleDescEditor.addEventListener('input', syncModuleDescriptionInput);
@@ -968,7 +977,8 @@ async function refreshModulesList() {
   const canReorder = !search && !typeFilter;
   let dragSrcCard = null;
 
-  for (const mod of filtered) {
+  for (let fi = 0; fi < filtered.length; fi++) {
+    const mod = filtered[fi];
     const typeDef = H5P_TYPES[mod.type] || {};
     const isSelected = mod.moduleSelected !== false;
     const card = document.createElement('div');
@@ -976,6 +986,7 @@ async function refreshModulesList() {
     card.dataset.moduleId = mod.id;
     card.innerHTML = `
       ${canReorder ? '<div class="module-drag-handle" title="Reihenfolge ändern">☰</div>' : ''}
+      <span class="module-card-number">${fi + 1}.</span>
       <input type="checkbox" class="module-select-checkbox" title="Modul für Schüler aktivieren" ${isSelected ? 'checked' : ''} />
       <div class="module-card-icon">${typeDef.icon || '📦'}</div>
       <div class="module-card-info">
@@ -1032,6 +1043,8 @@ async function refreshModulesList() {
         } else {
           card.before(dragSrcCard);
         }
+        // Update numbering
+        modulesList.querySelectorAll('.module-card .module-card-number').forEach((el, i) => { el.textContent = `${i + 1}.`; });
         // Persist new order
         const newOrder = [...modulesList.querySelectorAll('.module-card[data-module-id]')].map((c) => c.dataset.moduleId);
         await appApi.reorderModules(currentTopicId, newOrder);
