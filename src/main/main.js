@@ -379,7 +379,7 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
       y: 0,
       width: 15,
       height: 5,
-      multiple: true,
+      multiple: !!drag.multiple,
       backgroundOpacity: 100,
       dropZones: dropZones
         .map((_, idx) => String(idx)),
@@ -404,7 +404,11 @@ function convertNativeModuleToH5pQuestion(mod, topicImages = {}) {
       height: Number(zone.height) || 15,
       correctElements: draggables
         .map((drag, dragIdx) => ({ drag, dragIdx }))
-        .filter(({ drag }) => (drag.correctZone || '') === (zone.label || ''))
+        .filter(({ drag }) => {
+          const matchA = (drag.correctZone || '') === (zone.label || '');
+          const matchB = (zone.correctDraggable || '') === (drag.text || '');
+          return matchA || matchB;
+        })
         .map(({ dragIdx }) => String(dragIdx)),
       showLabel: true,
       backgroundOpacity: 100,

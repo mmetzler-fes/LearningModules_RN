@@ -77,6 +77,8 @@ const loginScreen = document.getElementById('loginScreen');
 const appContainer = document.getElementById('appContainer');
 const loginForm = document.getElementById('loginForm');
 const loginName = document.getElementById('loginName');
+const studentLoginSection = document.getElementById('studentLoginSection');
+const btnShowStudentLogin = document.getElementById('btnShowStudentLogin');
 const btnShowAdminLogin = document.getElementById('btnShowAdminLogin');
 const adminLoginSection = document.getElementById('adminLoginSection');
 const adminLoginForm = document.getElementById('adminLoginForm');
@@ -145,6 +147,7 @@ const moduleDescInput = document.getElementById('moduleDescription');
 const moduleDescToolbar = document.getElementById('moduleDescToolbar');
 const moduleDescEditor = document.getElementById('moduleDescriptionEditor');
 const moduleDescBlockFormat = document.getElementById('moduleDescBlockFormat');
+const moduleDescSpacing = document.getElementById('moduleDescSpacing');
 const moduleDescFontSize = document.getElementById('moduleDescFontSize');
 const moduleDescInsertTable = document.getElementById('moduleDescInsertTable');
 const moduleDescCreateLink = document.getElementById('moduleDescCreateLink');
@@ -264,6 +267,10 @@ function sanitizeModuleDescriptionHtml(html) {
     if (textAlignMatch && ['P', 'H1', 'H2', 'H3', 'BLOCKQUOTE', 'TH', 'TD', 'SPAN'].includes(tag)) {
       clean.style.textAlign = textAlignMatch[1].toLowerCase();
     }
+    const marginBottomMatch = style.match(/margin-bottom\s*:\s*(\d+px)/i);
+    if (marginBottomMatch && ['P', 'H1', 'H2', 'H3', 'DIV', 'LI', 'UL', 'OL'].includes(tag)) {
+      clean.style.marginBottom = marginBottomMatch[1].toLowerCase();
+    }
 
     Array.from(node.childNodes).forEach((child) => {
       clean.appendChild(sanitizeNode(child));
@@ -320,16 +327,46 @@ function initModuleDescriptionEditor() {
   });
 
   moduleDescBlockFormat.addEventListener('change', () => {
+    if (!moduleDescBlockFormat.value) return;
     applyModuleDescriptionCommand('formatBlock', moduleDescBlockFormat.value);
+    moduleDescBlockFormat.value = 'p';
   });
 
   moduleDescFontSize.addEventListener('change', () => {
     applyModuleDescriptionCommand('fontSize', moduleDescFontSize.value);
+    moduleDescFontSize.value = '3';
+  });
+
+  moduleDescSpacing.addEventListener('change', () => {
+    const val = moduleDescSpacing.value;
+    if (!val) return;
+    moduleDescEditor.focus();
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      let node = sel.getRangeAt(0).commonAncestorContainer;
+      if (node.nodeType === 3) node = node.parentNode;
+      while (node && node !== moduleDescEditor && !/^(P|H[1-6]|DIV|LI)$/i.test(node.nodeName)) {
+        node = node.parentNode;
+      }
+      if (node && node !== moduleDescEditor) {
+        node.style.marginBottom = val;
+      } else {
+        document.execCommand('formatBlock', false, 'p');
+        node = sel.getRangeAt(0).commonAncestorContainer;
+        if (node.nodeType === 3) node = node.parentNode;
+        while (node && node !== moduleDescEditor && !/^(P|H[1-6]|DIV|LI)$/i.test(node.nodeName)) {
+          node = node.parentNode;
+        }
+        if (node && node !== moduleDescEditor) node.style.marginBottom = val;
+      }
+    }
+    moduleDescSpacing.selectedIndex = 0;
+    syncModuleDescriptionInput();
   });
 
   moduleDescInsertTable.addEventListener('click', () => {
     moduleDescEditor.focus();
-    const tableHtml = '<table><thead><tr><th>Spalte 1</th><th>Spalte 2</th></tr></thead><tbody><tr><td>Inhalt</td><td>Inhalt</td></tr><tr><td>Inhalt</td><td>Inhalt</td></tr></tbody></table><p></p>';
+    const tableHtml = '<table class="h5p-table" style="width:100%; border-collapse:collapse; margin-top:10px; margin-bottom:10px;" border="1"><tbody><tr><td style="padding:6px;">Inhalt</td><td style="padding:6px;">Inhalt</td></tr><tr><td style="padding:6px;">Inhalt</td><td style="padding:6px;">Inhalt</td></tr></tbody></table><p><br></p>';
     document.execCommand('insertHTML', false, tableHtml);
     syncModuleDescriptionInput();
   });
@@ -353,6 +390,12 @@ function initModuleDescriptionEditor() {
     syncModuleDescriptionInput();
   });
 
+  moduleDescEditor.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const text = (e.originalEvent || e).clipboardData.getData('text/plain');
+    document.execCommand('insertText', false, text);
+  });
+  
   moduleDescEditor.addEventListener('input', syncModuleDescriptionInput);
   moduleDescEditor.addEventListener('blur', () => {
     setModuleDescriptionHtml(getModuleDescriptionHtml());
@@ -372,7 +415,14 @@ loginForm.addEventListener('submit', (e) => {
 });
 
 btnShowAdminLogin.addEventListener('click', () => {
-  adminLoginSection.classList.toggle('hidden');
+  studentLoginSection.classList.add('hidden');
+  adminLoginSection.classList.remove('hidden');
+  adminLoginError.classList.add('hidden');
+});
+
+btnShowStudentLogin.addEventListener('click', () => {
+  adminLoginSection.classList.add('hidden');
+  studentLoginSection.classList.remove('hidden');
   adminLoginError.classList.add('hidden');
 });
 
@@ -420,10 +470,12 @@ btnLogout.addEventListener('click', () => {
 
   // Clear form fields
   loginName.value = '';
-  adminUsername.value = '';
+  // adminUsername.value = 'admin';  // Leave this as is, the HTML defaultValue sets this via DOM initially, but let's re-enforce it
+  adminUsername.value = 'admin';
   adminPassword.value = '';
   adminLoginSection.classList.add('hidden');
   adminLoginError.classList.add('hidden');
+  studentLoginSection.classList.remove('hidden');
 
   loginName.focus();
 });
@@ -1688,22 +1740,52 @@ function collectQuizAnswer(mod) {
       break;
     }
     case 'dragAndDrop': {
-      const dragEls = quizModuleContainer.querySelectorAll('.dnd-player-drag');
-      let correct = 0;
-      let total = 0;
-      const placements = [];
-      dragEls.forEach((el) => {
-        const correctZone = el.dataset.correctZone || '';
-        const currentZone = el.dataset.currentZone || '';
-        if (correctZone) {
-          total++;
-          if (currentZone === correctZone) correct++;
+      const draggablesDef = content.draggables || [];
+      const zonesDef = content.dropZones || [];
+      
+      const expectedMappings = [];
+      draggablesDef.forEach(d => { 
+        if (d.correctZone && !expectedMappings.find(m => m.zone === d.correctZone && m.text === d.text)) {
+          expectedMappings.push({ zone: d.correctZone, text: d.text });
         }
-        placements.push(`${el.textContent} → ${currentZone || '(nicht zugeordnet)'}`);
       });
+      zonesDef.forEach(z => { 
+        if (z.correctDraggable && !expectedMappings.find(m => m.zone === z.label && m.text === z.correctDraggable)) {
+          expectedMappings.push({ zone: z.label, text: z.correctDraggable });
+        }
+      });
+
+      const dragEls = quizModuleContainer.querySelectorAll('.dnd-player-drag');
+      const expectedTotal = expectedMappings.length;
+      let correct = 0;
+      let incorrect = 0;
+      const placements = [];
+      const satisfiedDefs = new Set();
+
+      dragEls.forEach((el) => {
+        const currentZone = el.dataset.currentZone || '';
+        const text = el.textContent;
+        const isMultipleSource = el.dataset.multiple === 'true' && !currentZone;
+
+        if (currentZone) {
+          // Try to map this dropped element to a mapping requirement
+          const matchIdx = expectedMappings.findIndex((m, idx) => m.text === text && m.zone === currentZone && !satisfiedDefs.has(idx));
+          if (matchIdx !== -1) {
+            satisfiedDefs.add(matchIdx);
+            correct++;
+          } else {
+            incorrect++;
+          }
+          placements.push(`${text} → ${currentZone}`);
+        } else if (!isMultipleSource) {
+          // Unplaced normal item
+          placements.push(`${text} → (nicht zugeordnet)`);
+        }
+      });
+
       result.userAnswer = placements.join(', ');
-      result.correctAnswer = (content.draggables || []).filter((d) => d.correctZone).map((d) => `${d.text} → ${d.correctZone}`).join(', ');
-      result.isCorrect = total > 0 && correct === total;
+      result.correctAnswer = expectedMappings.map((m) => `${m.text} → ${m.zone}`).join(', ');
+      result.isCorrect = expectedTotal > 0 && correct === expectedTotal && incorrect === 0;
       break;
     }
     case 'flashcards': {
@@ -1759,7 +1841,7 @@ async function finishQuiz() {
   const pctClass = percentage >= 70 ? 'good' : percentage >= 40 ? 'medium' : 'poor';
   quizResultArea.innerHTML = `
     <div class="quiz-final-result">
-      <div class="quiz-result-icon">${percentage >= 70 ? '🎉' : percentage >= 40 ? '👍' : '💪'}</div>
+      <div class="quiz-result-icon">${percentage >= 80 ? '🏆' : percentage >= 50 ? '👍' : '📚'}</div>
       <h2>${t('quiz.complete')}</h2>
       <div class="quiz-result-score ${pctClass}">
         <span class="quiz-result-number">${score} / ${total}</span>
@@ -1887,7 +1969,7 @@ function createTypePreview(type, content, options = {}) {
       const answers = content.answers || [];
       div.innerHTML = `<div style="padding:20px; background:var(--bg-primary); border-radius:var(--radius-md);">
         ${renderModuleImage(content)}
-        <p style="font-weight:600; margin-bottom:16px;">${escapeHtml(q)}</p>
+        <div style="font-weight:600; margin-bottom:16px;">${sanitizeModuleDescriptionHtml(q)}</div>
         <div class="mc-answers"></div>
         ${suppressFeedback ? '' : '<button class="btn btn-primary btn-sm" style="margin-top:16px;" id="mcCheck">Überprüfen</button><div id="mcFeedback" style="margin-top:12px;"></div>'}
       </div>`;
@@ -1902,7 +1984,7 @@ function createTypePreview(type, content, options = {}) {
         input.value = i;
         input.dataset.correct = a.correct ? 'true' : 'false';
         const label = document.createElement('label');
-        label.textContent = a.text;
+        label.innerHTML = sanitizeModuleDescriptionHtml(a.text);
         row.appendChild(input);
         row.appendChild(label);
         answersEl.appendChild(row);
@@ -2266,7 +2348,7 @@ function createTypePreview(type, content, options = {}) {
     case 'fillInTheBlanks': {
       const questions = content.questions || [];
       div.innerHTML = `<div style="padding:20px; background:var(--bg-primary); border-radius:var(--radius-md);">
-        ${content.taskDescription ? `<p style="margin-bottom:16px;">${escapeHtml(content.taskDescription)}</p>` : ''}
+        ${content.taskDescription ? `<div style="margin-bottom:16px;">${sanitizeModuleDescriptionHtml(content.taskDescription)}</div>` : ''}
         ${renderModuleImage(content)}
         <div id="blanksArea"></div>
         ${suppressFeedback ? '' : '<button class="btn btn-primary btn-sm" style="margin-top:16px;" id="blanksCheck">Überprüfen</button><div id="blanksFeedback" style="margin-top:12px;"></div>'}
@@ -2274,19 +2356,35 @@ function createTypePreview(type, content, options = {}) {
       const blanksArea = div.querySelector('#blanksArea');
       const answerMap = [];
       questions.forEach((q) => {
-        const p = document.createElement('p');
+        const p = document.createElement('div');
         p.style.marginBottom = '12px';
-        const parts = (q.text || '').split(/\*([^*]+)\*/g);
-        parts.forEach((part, pi) => {
-          if (pi % 2 === 0) {
-            p.appendChild(document.createTextNode(part));
-          } else {
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.style.cssText = 'width:120px; padding:4px 8px; border:1px solid var(--border); border-radius:4px; margin:0 4px;';
-            input.dataset.answer = part;
-            p.appendChild(input);
-            answerMap.push({ answer: part, inputEl: input });
+        p.innerHTML = sanitizeModuleDescriptionHtml(q.text || '');
+        
+        const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT, null, false);
+        const textNodes = [];
+        let node;
+        while ((node = walker.nextNode())) textNodes.push(node);
+
+        textNodes.forEach((textNode) => {
+          const nodeText = textNode.nodeValue;
+          const parts = nodeText.split(/(\*[^*]+\*)/g);
+          if (parts.length > 1) {
+            const fragment = document.createDocumentFragment();
+            parts.forEach((part) => {
+              const match = part.match(/^\*(.+)\*$/);
+              if (match) {
+                const answer = match[1];
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.style.cssText = 'width:120px; padding:4px 8px; border:1px solid var(--border); border-radius:4px; margin:0 4px;';
+                input.dataset.answer = answer;
+                answerMap.push({ answer, inputEl: input });
+                fragment.appendChild(input);
+              } else if (part) {
+                fragment.appendChild(document.createTextNode(part));
+              }
+            });
+            textNode.parentNode.replaceChild(fragment, textNode);
           }
         });
         blanksArea.appendChild(p);
@@ -2342,8 +2440,33 @@ function createTypePreview(type, content, options = {}) {
       break;
     }
     case 'dragTheWords': {
+      let autoScrollInterval = null;
+      const startAutoScroll = (e) => {
+        const main = document.getElementById('mainContent');
+        if (!main) return;
+        const rect = main.getBoundingClientRect();
+        const y = e.clientY;
+        const topDist = y - rect.top;
+        const bottomDist = rect.bottom - y;
+        const threshold = 60;
+        let speed = 0;
+        if (topDist < threshold && topDist > -threshold) speed = -15;
+        else if (bottomDist < threshold && bottomDist > -threshold) speed = 15;
+        
+        if (speed !== 0 && !autoScrollInterval) {
+          autoScrollInterval = setInterval(() => { main.scrollTop += speed; }, 20);
+        } else if (speed === 0 && autoScrollInterval) {
+          clearInterval(autoScrollInterval);
+          autoScrollInterval = null;
+        }
+      };
+      const stopAutoScroll = () => {
+        if (autoScrollInterval) { clearInterval(autoScrollInterval); autoScrollInterval = null; }
+        document.removeEventListener('dragover', startAutoScroll);
+      };
+
       div.innerHTML = `<div class="dtw-container">
-        ${content.taskDescription ? `<p class="dtw-description">${escapeHtml(content.taskDescription)}</p>` : ''}
+        ${content.taskDescription ? `<div class="dtw-description">${sanitizeModuleDescriptionHtml(content.taskDescription)}</div>` : ''}
         ${renderModuleImage(content)}
         <div class="dtw-text-area" id="dtwTextArea"></div>
         <div class="dtw-word-bank" id="dtwWordBank"></div>
@@ -2352,68 +2475,77 @@ function createTypePreview(type, content, options = {}) {
       const text = content.textField || '';
       const textArea = div.querySelector('#dtwTextArea');
       const wordBank = div.querySelector('#dtwWordBank');
-      const parts = text.split(/(\*[^*]+\*)/g);
       const draggableWords = [];
       let dropIdx = 0;
+      textArea.innerHTML = sanitizeModuleDescriptionHtml(text);
+      
+      const walker = document.createTreeWalker(textArea, NodeFilter.SHOW_TEXT, null, false);
+      const textNodes = [];
+      let node;
+      while ((node = walker.nextNode())) textNodes.push(node);
 
-      parts.forEach((part) => {
-        const match = part.match(/^\*(.+)\*$/);
-        if (match) {
-          const correctWord = match[1];
-          draggableWords.push(correctWord);
-          const dropZone = document.createElement('span');
-          dropZone.className = 'dtw-drop-zone';
-          dropZone.dataset.correctWord = correctWord;
-          dropZone.dataset.dropIdx = dropIdx++;
-          dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dtw-drop-hover'); });
-          dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('dtw-drop-hover'); });
-          dropZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('dtw-drop-hover');
-            const word = e.dataTransfer.getData('text/plain');
-            const srcId = e.dataTransfer.getData('application/dtw-src');
-            // Return existing word to bank if slot is occupied
-            if (dropZone.dataset.currentWord) {
-              returnWordToBank(dropZone.dataset.currentWord, wordBank);
+      textNodes.forEach((textNode) => {
+        const nodeText = textNode.nodeValue;
+        const parts = nodeText.split(/(\*[^*]+\*)/g);
+        
+        if (parts.length > 1) {
+          const fragment = document.createDocumentFragment();
+          parts.forEach((part) => {
+            const match = part.match(/^\*(.+)\*$/);
+            if (match) {
+              const correctWord = match[1];
+              draggableWords.push(correctWord);
+              const dropZone = document.createElement('span');
+              dropZone.className = 'dtw-drop-zone';
+              dropZone.dataset.correctWord = correctWord;
+              dropZone.dataset.dropIdx = dropIdx++;
+              dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dtw-drop-hover'); });
+              dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('dtw-drop-hover'); });
+              dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('dtw-drop-hover');
+                const word = e.dataTransfer.getData('text/plain');
+                const srcId = e.dataTransfer.getData('application/dtw-src');
+                if (dropZone.dataset.currentWord) {
+                  returnWordToBank(dropZone.dataset.currentWord, wordBank);
+                }
+                dropZone.textContent = word;
+                dropZone.dataset.currentWord = word;
+                dropZone.classList.add('dtw-drop-filled');
+                const srcEl = wordBank.querySelector(`[data-dtw-id="${srcId}"]`);
+                if (srcEl) srcEl.classList.add('dtw-chip-used');
+                const fromZone = e.dataTransfer.getData('application/dtw-from-zone');
+                if (fromZone) {
+                  const prevZone = textArea.querySelector(`.dtw-drop-zone[data-drop-idx="${fromZone}"]`);
+                  if (prevZone && prevZone !== dropZone) {
+                    prevZone.textContent = '';
+                    prevZone.dataset.currentWord = '';
+                    prevZone.classList.remove('dtw-drop-filled');
+                  }
+                }
+              });
+              dropZone.setAttribute('draggable', 'false');
+              dropZone.addEventListener('mousedown', (e) => {
+                if (dropZone.dataset.currentWord) dropZone.setAttribute('draggable', 'true');
+              });
+              dropZone.addEventListener('dragstart', (e) => {
+                if (!dropZone.dataset.currentWord) { e.preventDefault(); return; }
+                e.dataTransfer.setData('text/plain', dropZone.dataset.currentWord);
+                e.dataTransfer.setData('application/dtw-src', '');
+                e.dataTransfer.setData('application/dtw-from-zone', dropZone.dataset.dropIdx);
+                e.dataTransfer.effectAllowed = 'move';
+                document.addEventListener('dragover', startAutoScroll);
+              });
+              dropZone.addEventListener('dragend', () => { 
+                dropZone.setAttribute('draggable', 'false'); 
+                stopAutoScroll();
+              });
+              fragment.appendChild(dropZone);
+            } else if (part) {
+              fragment.appendChild(document.createTextNode(part));
             }
-            dropZone.textContent = word;
-            dropZone.dataset.currentWord = word;
-            dropZone.classList.add('dtw-drop-filled');
-            // Remove dragged chip from bank
-            const srcEl = wordBank.querySelector(`[data-dtw-id="${srcId}"]`);
-            if (srcEl) srcEl.classList.add('dtw-chip-used');
-            // If dragged from another drop zone, clear that one
-            const fromZone = e.dataTransfer.getData('application/dtw-from-zone');
-            if (fromZone) {
-              const prevZone = textArea.querySelector(`.dtw-drop-zone[data-drop-idx="${fromZone}"]`);
-              if (prevZone && prevZone !== dropZone) {
-                prevZone.textContent = '';
-                prevZone.dataset.currentWord = '';
-                prevZone.classList.remove('dtw-drop-filled');
-              }
-            }
           });
-          // Allow dragging words out of a filled drop zone
-          dropZone.setAttribute('draggable', 'false');
-          dropZone.addEventListener('mousedown', (e) => {
-            if (dropZone.dataset.currentWord) dropZone.setAttribute('draggable', 'true');
-          });
-          dropZone.addEventListener('dragstart', (e) => {
-            if (!dropZone.dataset.currentWord) { e.preventDefault(); return; }
-            e.dataTransfer.setData('text/plain', dropZone.dataset.currentWord);
-            e.dataTransfer.setData('application/dtw-src', '');
-            e.dataTransfer.setData('application/dtw-from-zone', dropZone.dataset.dropIdx);
-            e.dataTransfer.effectAllowed = 'move';
-          });
-          dropZone.addEventListener('dragend', () => { dropZone.setAttribute('draggable', 'false'); });
-          textArea.appendChild(dropZone);
-        } else {
-          if (part.trim()) {
-            const textNode = document.createElement('span');
-            textNode.className = 'dtw-static-text';
-            textNode.textContent = part;
-            textArea.appendChild(textNode);
-          }
+          textNode.parentNode.replaceChild(fragment, textNode);
         }
       });
 
@@ -2429,7 +2561,9 @@ function createTypePreview(type, content, options = {}) {
           e.dataTransfer.setData('text/plain', word);
           e.dataTransfer.setData('application/dtw-src', chip.dataset.dtwId);
           e.dataTransfer.effectAllowed = 'move';
+          document.addEventListener('dragover', startAutoScroll);
         });
+        chip.addEventListener('dragend', stopAutoScroll);
         wordBank.appendChild(chip);
       });
 
@@ -2652,9 +2786,13 @@ function createTypePreview(type, content, options = {}) {
           const dragId = e.dataTransfer.getData('text/plain');
           const dragBtn = div.querySelector(`[data-drag-id="${dragId}"]`);
           if (dragBtn) {
-            dragBtn.dataset.currentZone = z.label;
-            zoneEl.querySelector('.dnd-player-zone-items').appendChild(dragBtn);
-            dragBtn.classList.add('placed');
+            let elToPlace = dragBtn;
+            if (dragBtn.dataset.multiple === 'true' && dragBtn.parentElement === dragsEl && typeof dragBtn.cloneSelf === 'function') {
+              elToPlace = dragBtn.cloneSelf();
+            }
+            elToPlace.dataset.currentZone = z.label;
+            zoneEl.querySelector('.dnd-player-zone-items').appendChild(elToPlace);
+            elToPlace.classList.add('placed');
           }
         });
 
@@ -2667,41 +2805,66 @@ function createTypePreview(type, content, options = {}) {
 
       // Render draggable elements
       drags.forEach((d, i) => {
-        const drag = document.createElement('div');
-        drag.className = 'dnd-player-drag';
-        drag.textContent = d.text;
-        drag.draggable = true;
-        drag.dataset.dragId = 'drag-' + i;
-        drag.dataset.correctZone = d.correctZone || '';
-        drag.dataset.currentZone = '';
+        let cloneCounter = 0;
+        function createDraggableNode(isClone = false) {
+          const drag = document.createElement('div');
+          drag.className = 'dnd-player-drag';
+          drag.textContent = d.text;
+          drag.draggable = true;
+          drag.dataset.dragId = isClone ? `drag-${i}-${++cloneCounter}` : `drag-${i}`;
+          drag.dataset.correctZone = d.correctZone || '';
+          drag.dataset.currentZone = '';
+          drag.dataset.multiple = d.multiple ? 'true' : 'false';
 
-        drag.addEventListener('dragstart', (e) => {
-          e.dataTransfer.setData('text/plain', drag.dataset.dragId);
-          drag.classList.add('dragging');
-        });
-        drag.addEventListener('dragend', () => {
-          drag.classList.remove('dragging');
-        });
+          drag.addEventListener('dragstart', (e) => {
+            e.dataTransfer.setData('text/plain', drag.dataset.dragId);
+            drag.classList.add('dragging');
+          });
+          drag.addEventListener('dragend', () => {
+            drag.classList.remove('dragging');
+          });
 
-        // Also support click-to-cycle for touch/accessibility
-        drag.addEventListener('click', () => {
-          const currentZone = drag.dataset.currentZone || '';
-          const zoneNames = zones.map((z) => z.label);
-          const currentIdx = zoneNames.indexOf(currentZone);
-          const nextIdx = (currentIdx + 1) % (zoneNames.length + 1);
-          if (nextIdx >= zoneNames.length) {
-            drag.dataset.currentZone = '';
-            drag.classList.remove('placed');
-            dragsEl.appendChild(drag);
-          } else {
-            drag.dataset.currentZone = zoneNames[nextIdx];
-            drag.classList.add('placed');
-            const zoneItemsEl = canvasEl.querySelector(`[data-zone="${escapeAttr(zoneNames[nextIdx])}"]`);
-            if (zoneItemsEl) zoneItemsEl.appendChild(drag);
-          }
-        });
+          // support click-to-cycle
+          drag.addEventListener('click', () => {
+            const currentZone = drag.dataset.currentZone || '';
+            const zoneNames = zones.map((z) => z.label);
+            
+            // If clicking original "multiple" draggable in bank, spawn a clone in first zone
+            if (d.multiple && !isClone && drag.parentElement === dragsEl) {
+               if (zones.length > 0) {
+                 const clone = createDraggableNode(true);
+                 clone.dataset.currentZone = zoneNames[0];
+                 clone.classList.add('placed');
+                 const zItems = (hasImage ? canvasEl : div.querySelector('#dndZonesLegacy')).querySelector(`.dnd-player-zone[data-zone="${escapeAttr(zoneNames[0])}"] .dnd-player-zone-items`);
+                 if (zItems) zItems.appendChild(clone);
+               }
+               return;
+            }
 
-        dragsEl.appendChild(drag);
+            const currentIdx = zoneNames.indexOf(currentZone);
+            const nextIdx = (currentIdx + 1) % (zoneNames.length + 1);
+            if (nextIdx >= zoneNames.length) {
+              if (isClone) {
+                drag.remove(); // destroy clone if cycled out
+              } else {
+                drag.dataset.currentZone = '';
+                drag.classList.remove('placed');
+                dragsEl.appendChild(drag);
+              }
+            } else {
+              drag.dataset.currentZone = zoneNames[nextIdx];
+              drag.classList.add('placed');
+              const zoneItemsEl = (hasImage ? canvasEl : div.querySelector('#dndZonesLegacy')).querySelector(`.dnd-player-zone[data-zone="${escapeAttr(zoneNames[nextIdx])}"] .dnd-player-zone-items`);
+              if (zoneItemsEl) zoneItemsEl.appendChild(drag);
+            }
+          });
+          
+          if (!isClone) drag.cloneSelf = () => createDraggableNode(true);
+          return drag;
+        }
+
+        const originalDrag = createDraggableNode(false);
+        dragsEl.appendChild(originalDrag);
       });
       break;
     }

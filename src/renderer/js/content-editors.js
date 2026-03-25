@@ -274,43 +274,46 @@ class ContentEditorManager {
     const wrapper = document.createElement('div');
     wrapper.className = 'rich-text-editor';
 
-    // Toolbar
+    // Toolbar (Compact Styling)
     const toolbar = document.createElement('div');
     toolbar.className = 'rich-text-toolbar';
-    const cmds = [
-      { cmd: 'bold', icon: 'B', title: 'Fett', style: 'font-weight:bold;' },
-      { cmd: 'italic', icon: 'I', title: 'Kursiv', style: 'font-style:italic;' },
-      { cmd: 'underline', icon: 'U', title: 'Unterstrichen', style: 'text-decoration:underline;' },
-      { cmd: 'strikeThrough', icon: 'S', title: 'Durchgestrichen', style: 'text-decoration:line-through;' },
-    ];
-    for (const c of cmds) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'btn btn-secondary btn-sm';
-      btn.innerHTML = `<span style="${c.style}">${c.icon}</span>`;
-      btn.title = c.title;
-      btn.addEventListener('click', () => {
-        editor.focus();
-        document.execCommand(c.cmd, false, null);
-      });
-      toolbar.appendChild(btn);
-    }
-    // Clear format button
-    const btnClear = document.createElement('button');
-    btnClear.type = 'button';
-    btnClear.className = 'btn btn-secondary btn-sm';
-    btnClear.textContent = 'T\u2093';
-    btnClear.title = 'Formatierung entfernen';
-    btnClear.addEventListener('click', () => {
-      editor.focus();
-      document.execCommand('removeFormat', false, null);
-      const sel = window.getSelection();
-      if (sel && sel.rangeCount > 0) {
-        document.execCommand('formatBlock', false, 'p');
-      }
-    });
-    toolbar.appendChild(btnClear);
-    wrapper.appendChild(toolbar);
+    toolbar.innerHTML = `
+      <select class="rt-select rt-block-format" title="Textformat">
+        <option value="p">¶ Stil</option>
+        <option value="h1">H1</option>
+        <option value="h2">H2</option>
+        <option value="h3">H3</option>
+      </select>
+      <div class="rt-separator"></div>
+      <select class="rt-select rt-spacing" title="Absatz-Abstand">
+        <option value="" disabled selected>↕ Abstand</option>
+        <option value="0px">0px</option>
+        <option value="12px">12px</option>
+        <option value="20px">20px</option>
+      </select>
+      <div class="rt-separator"></div>
+      <select class="rt-select rt-font-size" title="Schriftgröße">
+        <option value="1">XS</option>
+        <option value="2">S</option>
+        <option value="3" selected>Aa Größe</option>
+        <option value="4">L</option>
+        <option value="5">XL</option>
+        <option value="6">XXL</option>
+      </select>
+      <div class="rt-separator"></div>
+      <button type="button" class="rt-btn" data-cmd="bold" title="Fett"><b>B</b></button>
+      <button type="button" class="rt-btn" data-cmd="italic" title="Kursiv"><i style="font-family:serif;font-weight:600;">I</i></button>
+      <button type="button" class="rt-btn" data-cmd="underline" title="Unterstrichen"><u>U</u></button>
+      <button type="button" class="rt-btn" data-cmd="strikeThrough" title="Durchgestrichen"><s>S</s></button>
+      <div class="rt-separator"></div>
+      <button type="button" class="rt-btn" data-cmd="insertUnorderedList" title="Aufzählungsliste">≡ ⁝</button>
+      <button type="button" class="rt-btn" data-cmd="insertOrderedList" title="Nummerierte Liste">1. ⁝</button>
+      <div class="rt-separator"></div>
+      <button type="button" class="rt-btn rt-btn-link" title="Link einfügen">🔗</button>
+      <button type="button" class="rt-btn rt-btn-table" title="Tabelle einfügen">▦ Table</button>
+      <div class="rt-separator"></div>
+      <button type="button" class="rt-btn rt-btn-clear" title="Formatierung entfernen">T\u2093</button>
+    `;
 
     // Editable area
     const editor = document.createElement('div');
@@ -321,14 +324,93 @@ class ContentEditorManager {
     editor.innerHTML = hasMarkup ? (value || '') : escapeHtmlPreservingText(value || '');
     if (field.placeholder) editor.dataset.placeholder = field.placeholder;
 
+    // Attach Event Listeners to Toolbar
+    toolbar.querySelectorAll('[data-cmd]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        editor.focus();
+        document.execCommand(btn.dataset.cmd, false, null);
+      });
+    });
+
+    toolbar.querySelector('.rt-block-format').addEventListener('change', (e) => {
+      if (!e.target.value) return;
+      editor.focus();
+      document.execCommand('formatBlock', false, e.target.value);
+      e.target.value = 'p'; // reset visually to avoid confusion when selection changes
+    });
+
+    toolbar.querySelector('.rt-font-size').addEventListener('change', (e) => {
+      editor.focus();
+      document.execCommand('fontSize', false, e.target.value);
+      e.target.value = '3'; // reset visually to Normal
+    });
+
+    toolbar.querySelector('.rt-spacing').addEventListener('change', (e) => {
+      const val = e.target.value;
+      if (!val) return;
+      editor.focus();
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        let node = sel.getRangeAt(0).commonAncestorContainer;
+        if (node.nodeType === 3) node = node.parentNode;
+        while (node && node !== editor && !/^(P|H[1-6]|DIV|LI)$/i.test(node.nodeName)) {
+          node = node.parentNode;
+        }
+        if (node && node !== editor) {
+          node.style.marginBottom = val;
+        } else {
+          document.execCommand('formatBlock', false, 'p');
+          node = sel.getRangeAt(0).commonAncestorContainer;
+          if (node.nodeType === 3) node = node.parentNode;
+          while (node && node !== editor && !/^(P|H[1-6]|DIV|LI)$/i.test(node.nodeName)) {
+            node = node.parentNode;
+          }
+          if (node && node !== editor) node.style.marginBottom = val;
+        }
+      }
+      e.target.selectedIndex = 0; // reset visually
+    });
+
+    toolbar.querySelector('.rt-btn-link').addEventListener('click', () => {
+      const selection = window.getSelection();
+      if (!selection.rangeCount) return;
+      
+      const url = prompt('Link-URL eingeben:', 'https://');
+      if (url) {
+        editor.focus();
+        document.execCommand('createLink', false, url.trim());
+      }
+    });
+
+    toolbar.querySelector('.rt-btn-table').addEventListener('click', () => {
+      editor.focus();
+      const tableHtml = '<table class="h5p-table" style="width:100%; border-collapse:collapse; margin-top:10px; margin-bottom:10px;" border="1"><tbody><tr><td style="padding:6px;">Inhalt</td><td style="padding:6px;">Inhalt</td></tr><tr><td style="padding:6px;">Inhalt</td><td style="padding:6px;">Inhalt</td></tr></tbody></table><p><br></p>';
+      document.execCommand('insertHTML', false, tableHtml);
+    });
+
+    toolbar.querySelector('.rt-btn-clear').addEventListener('click', () => {
+      editor.focus();
+      document.execCommand('removeFormat', false, null);
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        document.execCommand('formatBlock', false, 'p');
+      }
+    });
+
     // Hidden input to hold the HTML value for collectData
     const hidden = document.createElement('input');
     hidden.type = 'hidden';
     hidden.name = `content_${field.key}`;
     hidden.value = value || '';
+    editor.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const text = (e.originalEvent || e).clipboardData.getData('text/plain');
+      document.execCommand('insertText', false, text);
+    });
     editor.addEventListener('input', () => { hidden.value = editor.innerHTML; });
     editor.addEventListener('blur', () => { hidden.value = editor.innerHTML; });
 
+    wrapper.appendChild(toolbar);
     wrapper.appendChild(editor);
     group.appendChild(wrapper);
     group.appendChild(hidden);
@@ -584,6 +666,7 @@ class ContentEditorManager {
       dropZones: (data.dropZones || []).map((z, i) => ({
         id: i,
         label: z.label || '',
+        correctDraggable: z.correctDraggable || '',
         x: z.x ?? 10,
         y: z.y ?? 10,
         width: z.width ?? 20,
@@ -592,6 +675,7 @@ class ContentEditorManager {
       draggables: (data.draggables || []).map((d) => ({
         text: d.text || '',
         correctZone: d.correctZone || '',
+        multiple: !!d.multiple,
       })),
       nextZoneId: (data.dropZones || []).length,
       selectedZone: null,
@@ -689,7 +773,7 @@ class ContentEditorManager {
     btnAddDrag.className = 'btn-add-item';
     btnAddDrag.textContent = '+ Ziehbares Element hinzufügen';
     btnAddDrag.addEventListener('click', () => {
-      this.dndState.draggables.push({ text: '', correctZone: '' });
+      this.dndState.draggables.push({ text: '', correctZone: '', multiple: false });
       this.refreshDndDraggables();
     });
     dragsGroup.appendChild(btnAddDrag);
@@ -717,7 +801,7 @@ class ContentEditorManager {
       if (!this.dndState.backgroundImage) return;
       const id = this.dndState.nextZoneId++;
       this.dndState.dropZones.push({
-        id, label: `Zone ${id + 1}`, x: 35, y: 35, width: 25, height: 20,
+        id, label: `Ablagezone ${id + 1}`, correctDraggable: '', x: 35, y: 35, width: 25, height: 20,
       });
       this.refreshDndCanvas();
       this.refreshDndZonesList();
@@ -806,7 +890,7 @@ class ContentEditorManager {
       if (w < 3 || h < 3) return; // Too small, ignore
 
       const id = this.dndState.nextZoneId++;
-      this.dndState.dropZones.push({ id, label: `Zone ${id + 1}`, x, y, width: w, height: h });
+      this.dndState.dropZones.push({ id, label: `Ablagezone ${id + 1}`, correctDraggable: '', x, y, width: w, height: h });
       this.refreshDndCanvas();
       this.refreshDndZonesList();
       this.refreshDndDraggables();
@@ -987,8 +1071,14 @@ class ContentEditorManager {
       labelInput.value = zone.label;
       labelInput.placeholder = 'Zonenbezeichnung...';
       labelInput.className = 'dnd-zone-label-input';
+      let oldLabel = zone.label;
       labelInput.addEventListener('input', () => {
-        zone.label = labelInput.value;
+        const newLabel = labelInput.value;
+        zone.label = newLabel;
+        this.dndState.draggables.forEach(d => {
+          if (d.correctZone === oldLabel) d.correctZone = newLabel;
+        });
+        oldLabel = newLabel;
         this.refreshDndCanvas();
         this.refreshDndDraggables();
       });
@@ -996,6 +1086,30 @@ class ContentEditorManager {
       const posLabel = document.createElement('span');
       posLabel.className = 'dnd-zone-pos';
       posLabel.textContent = `${zone.x}%, ${zone.y}% — ${zone.width}×${zone.height}%`;
+
+      const targetLabel = document.createElement('span');
+      targetLabel.innerHTML = '&nbsp;➡ Erwartetes Wort:&nbsp;';
+      targetLabel.style.fontSize = '0.85rem';
+      targetLabel.style.color = 'var(--text-secondary)';
+
+      const dragSelect = document.createElement('select');
+      dragSelect.className = 'dnd-zone-drag-select';
+      dragSelect.style.flex = '1';
+      
+      const emptyOptD = document.createElement('option');
+      emptyOptD.value = '';
+      emptyOptD.textContent = '— Kein Element —';
+      dragSelect.appendChild(emptyOptD);
+      
+      const uniqueDrags = [...new Set(this.dndState.draggables.map(d => d.text).filter(Boolean))];
+      uniqueDrags.forEach((dragText) => {
+        const opt = document.createElement('option');
+        opt.value = dragText;
+        opt.textContent = dragText;
+        if (zone.correctDraggable === dragText) opt.selected = true;
+        dragSelect.appendChild(opt);
+      });
+      dragSelect.addEventListener('change', () => { zone.correctDraggable = dragSelect.value; });
 
       const btnRemove = document.createElement('button');
       btnRemove.type = 'button';
@@ -1010,6 +1124,8 @@ class ContentEditorManager {
 
       item.appendChild(colorDot);
       item.appendChild(labelInput);
+      item.appendChild(targetLabel);
+      item.appendChild(dragSelect);
       item.appendChild(posLabel);
       item.appendChild(btnRemove);
       list.appendChild(item);
@@ -1029,18 +1145,39 @@ class ContentEditorManager {
       numLabel.className = 'dnd-drag-num';
       numLabel.textContent = `#${i + 1}`;
 
+      const wordLabel = document.createElement('span');
+      wordLabel.innerHTML = '&nbsp;Wort:&nbsp;';
+      wordLabel.style.fontSize = '0.85rem';
+      wordLabel.style.color = 'var(--text-secondary)';
+
       const textInput = document.createElement('input');
       textInput.type = 'text';
       textInput.value = drag.text;
-      textInput.placeholder = 'Element-Text...';
+      textInput.placeholder = 'Ziehbarer Text...';
       textInput.className = 'dnd-drag-text-input';
-      textInput.addEventListener('input', () => { drag.text = textInput.value; });
+      textInput.style.flex = '1';
+      let oldDragText = drag.text;
+      textInput.addEventListener('input', () => { 
+        const newDragText = textInput.value;
+        drag.text = newDragText;
+        this.dndState.dropZones.forEach(z => {
+          if (z.correctDraggable === oldDragText) z.correctDraggable = newDragText;
+        });
+        oldDragText = newDragText;
+        this.refreshDndZonesList();
+      });
+
+      const targetLabel = document.createElement('span');
+      targetLabel.innerHTML = '&nbsp;➡ Ziel:&nbsp;';
+      targetLabel.style.fontSize = '0.85rem';
+      targetLabel.style.color = 'var(--text-secondary)';
 
       const zoneSelect = document.createElement('select');
       zoneSelect.className = 'dnd-drag-zone-select';
+      zoneSelect.style.flex = '1';
       const emptyOpt = document.createElement('option');
       emptyOpt.value = '';
-      emptyOpt.textContent = '— Korrekte Zone —';
+      emptyOpt.textContent = '— Keine Zone —';
       zoneSelect.appendChild(emptyOpt);
       this.dndState.dropZones.forEach((zone) => {
         const opt = document.createElement('option');
@@ -1050,6 +1187,22 @@ class ContentEditorManager {
         zoneSelect.appendChild(opt);
       });
       zoneSelect.addEventListener('change', () => { drag.correctZone = zoneSelect.value; });
+
+      const chkWrap = document.createElement('label');
+      chkWrap.style.display = 'flex';
+      chkWrap.style.alignItems = 'center';
+      chkWrap.style.gap = '4px';
+      chkWrap.style.margin = '0 10px';
+      chkWrap.style.fontSize = '0.8rem';
+      chkWrap.style.color = 'var(--text-secondary)';
+      chkWrap.style.cursor = 'pointer';
+      
+      const chkInput = document.createElement('input');
+      chkInput.type = 'checkbox';
+      chkInput.checked = !!drag.multiple;
+      chkInput.addEventListener('change', () => { drag.multiple = chkInput.checked; });
+      chkWrap.appendChild(chkInput);
+      chkWrap.appendChild(document.createTextNode('Mehrfach nutzbar'));
 
       const btnRemove = document.createElement('button');
       btnRemove.type = 'button';
@@ -1061,8 +1214,11 @@ class ContentEditorManager {
       });
 
       item.appendChild(numLabel);
+      item.appendChild(wordLabel);
       item.appendChild(textInput);
+      item.appendChild(targetLabel);
       item.appendChild(zoneSelect);
+      item.appendChild(chkWrap);
       item.appendChild(btnRemove);
       list.appendChild(item);
     });
@@ -1076,6 +1232,7 @@ class ContentEditorManager {
       backgroundImage: this.dndState.backgroundImage,
       dropZones: this.dndState.dropZones.map((z) => ({
         label: z.label,
+        correctDraggable: z.correctDraggable,
         x: z.x,
         y: z.y,
         width: z.width,
@@ -1084,6 +1241,7 @@ class ContentEditorManager {
       draggables: this.dndState.draggables.filter((d) => d.text.trim()).map((d) => ({
         text: d.text,
         correctZone: d.correctZone,
+        multiple: d.multiple,
       })),
     };
   }

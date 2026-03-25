@@ -28,22 +28,25 @@
           <span class="login-qr-url">https://github.com/mmetzler-fes/LearningModules_RN</span>
         </div>
       </div>
-      <form id="loginForm" class="login-form">
-        <div class="form-group">
-          <label for="loginName" data-i18n="login.name.label">Dein Name</label>
-          <input type="text" id="loginName" required data-i18n-placeholder="login.name.placeholder" placeholder="Name eingeben..." autocomplete="off" />
-        </div>
-        <button type="submit" class="btn btn-primary btn-full" id="btnStudentLogin" data-i18n="login.student">🎓 Als Schüler anmelden</button>
-      </form>
-      <div class="login-divider"><span data-i18n="login.or">oder</span></div>
-      <button class="btn btn-secondary btn-full" id="btnShowAdminLogin" data-i18n="login.teacher.toggle">🔐 Zum Lehrer-Bereich</button>
+      <!-- Student Login Section -->
+      <div id="studentLoginSection">
+        <form id="loginForm" class="login-form">
+          <div class="form-group">
+            <label for="loginName" data-i18n="login.name.label">Dein Name</label>
+            <input type="text" id="loginName" required data-i18n-placeholder="login.name.placeholder" placeholder="Name eingeben..." autocomplete="off" />
+          </div>
+          <button type="submit" class="btn btn-primary btn-full" id="btnStudentLogin" data-i18n="login.student">🎓 Als Schüler anmelden</button>
+        </form>
+        <div class="login-divider"><span data-i18n="login.or">oder</span></div>
+        <button class="btn btn-secondary btn-full" id="btnShowAdminLogin" data-i18n="login.teacher.toggle">🔐 Zum Lehrer-Bereich</button>
+      </div>
 
       <!-- Admin Login (hidden by default) -->
       <div id="adminLoginSection" class="admin-login-section hidden">
         <form id="adminLoginForm" class="login-form">
           <div class="form-group">
             <label for="adminUsername" data-i18n="login.admin.username.label">Benutzername</label>
-            <input type="text" id="adminUsername" required data-i18n-placeholder="login.admin.username.placeholder" placeholder="admin" autocomplete="off" />
+            <input type="text" id="adminUsername" required data-i18n-placeholder="login.admin.username.placeholder" placeholder="admin" autocomplete="off" value="admin" />
           </div>
           <div class="form-group">
             <label for="adminPassword" data-i18n="login.admin.password.label">Passwort</label>
@@ -52,6 +55,8 @@
           <button type="submit" class="btn btn-primary btn-full" data-i18n="login.admin.submit">🔑 Lehrer-Login</button>
           <p id="adminLoginError" class="login-error hidden" data-i18n="login.admin.error">Falsche Anmeldedaten.</p>
         </form>
+        <div class="login-divider"><span data-i18n="login.or">oder</span></div>
+        <button class="btn btn-secondary btn-full" id="btnShowStudentLogin" data-i18n="login.student.toggle">🎓 Zurück zum Schüler-Bereich</button>
       </div>
     </div>
   </div>
@@ -234,27 +239,41 @@
             <label for="moduleDescription" data-i18n="module.desc.label">Beschreibung</label>
             <div class="rich-text-editor" id="moduleDescEditorWrap">
               <div class="rich-text-toolbar" id="moduleDescToolbar">
-                <button type="button" class="btn btn-secondary btn-sm" data-command="bold" title="Fett"><strong>B</strong></button>
-                <button type="button" class="btn btn-secondary btn-sm" data-command="italic" title="Kursiv"><em>I</em></button>
-                <button type="button" class="btn btn-secondary btn-sm" data-command="underline" title="Unterstreichen"><u>U</u></button>
-                <button type="button" class="btn btn-secondary btn-sm" data-command="insertUnorderedList" title="Aufzählung">• Liste</button>
-                <button type="button" class="btn btn-secondary btn-sm" data-command="insertOrderedList" title="Nummerierte Liste">1. Liste</button>
-                <select id="moduleDescBlockFormat" class="setting-select rich-text-select" title="Absatzformat">
-                  <option value="P">Absatz</option>
-                  <option value="H1">Überschrift 1</option>
-                  <option value="H2">Überschrift 2</option>
-                  <option value="H3">Überschrift 3</option>
-                  <option value="BLOCKQUOTE">Zitat</option>
+                <select id="moduleDescBlockFormat" class="rt-select rt-block-format" title="Textformat">
+                  <option value="p">¶ Stil</option>
+                  <option value="h1">H1</option>
+                  <option value="h2">H2</option>
+                  <option value="h3">H3</option>
                 </select>
-                <select id="moduleDescFontSize" class="setting-select rich-text-select" title="Schriftgröße">
-                  <option value="2">Klein</option>
-                  <option value="3" selected>Normal</option>
-                  <option value="4">Groß</option>
-                  <option value="5">Sehr groß</option>
+                <div class="rt-separator"></div>
+                <select id="moduleDescSpacing" class="rt-select rt-spacing" title="Absatz-Abstand">
+                  <option value="" disabled selected>↕ Abstand</option>
+                  <option value="0px">0px</option>
+                  <option value="12px">12px</option>
+                  <option value="20px">20px</option>
                 </select>
-                <button type="button" class="btn btn-secondary btn-sm" id="moduleDescInsertTable" title="Tabelle einfügen">▦ Tabelle</button>
-                <button type="button" class="btn btn-secondary btn-sm" id="moduleDescCreateLink" title="Link einfügen">🔗 Link</button>
-                <button type="button" class="btn btn-secondary btn-sm" id="moduleDescClearFormat" title="Formatierung entfernen">Tx</button>
+                <div class="rt-separator"></div>
+                <select id="moduleDescFontSize" class="rt-select rt-font-size" title="Schriftgröße">
+                  <option value="1">XS</option>
+                  <option value="2">S</option>
+                  <option value="3" selected>Aa Größe</option>
+                  <option value="4">L</option>
+                  <option value="5">XL</option>
+                  <option value="6">XXL</option>
+                </select>
+                <div class="rt-separator"></div>
+                <button type="button" class="rt-btn" data-command="bold" title="Fett"><b>B</b></button>
+                <button type="button" class="rt-btn" data-command="italic" title="Kursiv"><i style="font-family:serif;font-weight:600;">I</i></button>
+                <button type="button" class="rt-btn" data-command="underline" title="Unterstrichen"><u>U</u></button>
+                <button type="button" class="rt-btn" data-command="strikeThrough" title="Durchgestrichen"><s>S</s></button>
+                <div class="rt-separator"></div>
+                <button type="button" class="rt-btn" data-command="insertUnorderedList" title="Aufzählungsliste">≡ ⁝</button>
+                <button type="button" class="rt-btn" data-command="insertOrderedList" title="Nummerierte Liste">1. ⁝</button>
+                <div class="rt-separator"></div>
+                <button type="button" class="rt-btn rt-btn-link" id="moduleDescCreateLink" title="Link einfügen">🔗</button>
+                <button type="button" class="rt-btn rt-btn-table" id="moduleDescInsertTable" title="Tabelle einfügen">▦ Table</button>
+                <div class="rt-separator"></div>
+                <button type="button" class="rt-btn rt-btn-clear" id="moduleDescClearFormat" title="Formatierung entfernen">T&#x2093;</button>
               </div>
               <div id="moduleDescriptionEditor" class="rich-text-surface" contenteditable="true" role="textbox" aria-multiline="true"></div>
               <textarea id="moduleDescription" class="hidden" rows="3" data-i18n-placeholder="module.desc.placeholder" placeholder="Optionale Beschreibung..."></textarea>

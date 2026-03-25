@@ -152,6 +152,7 @@ const H5P_TYPES = {
       { key: 'draggables', type: 'list', label: 'Ziehbare Elemente', itemFields: [
         { key: 'text', type: 'text', label: 'Element-Text', required: true },
         { key: 'correctZone', type: 'text', label: 'Korrekte Zone (Bezeichnung)' },
+        { key: 'multiple', type: 'checkbox', label: 'Mehrfach verwendbar', default: false }
       ]},
     ],
   },
@@ -164,7 +165,7 @@ const H5P_TYPES = {
     fields: [
       { key: 'taskDescription', type: 'richtext', label: 'Aufgabenbeschreibung' },
       { key: 'imageUrl', type: 'image', label: 'Bild (optional)' },
-      { key: 'textField', type: 'textarea', label: 'Text (ziehbare Wörter mit *Sternchen* markieren)', required: true,
+      { key: 'textField', type: 'richtext', label: 'Text (ziehbare Wörter mit *Sternchen* markieren)', required: true,
         placeholder: 'Die *Sonne* scheint am *Himmel*.' },
       { key: 'enableRetry', type: 'checkbox', label: 'Wiederholen erlauben', default: true, advanced: true },
       { key: 'enableSolutionsButton', type: 'checkbox', label: 'Lösung anzeigen erlauben', default: true, advanced: true },
@@ -198,7 +199,7 @@ const H5P_TYPES = {
       { key: 'taskDescription', type: 'richtext', label: 'Aufgabenbeschreibung' },
       { key: 'imageUrl', type: 'image', label: 'Bild (optional)' },
       { key: 'questions', type: 'list', label: 'Sätze mit Lücken', itemFields: [
-        { key: 'text', type: 'text', label: 'Satz (Lücken mit *Antwort* markieren)', required: true,
+        { key: 'text', type: 'richtext', label: 'Satz (Lücken mit *Antwort* markieren)', required: true,
           placeholder: 'Berlin ist die *Hauptstadt* von Deutschland.' },
       ]},
       { key: 'caseSensitive', type: 'checkbox', label: 'Groß-/Kleinschreibung beachten', default: false },
@@ -274,7 +275,7 @@ const H5P_TYPES = {
       { key: 'question', type: 'richtext', label: 'Frage', required: true },
       { key: 'imageUrl', type: 'image', label: 'Bild (optional)' },
       { key: 'answers', type: 'list', label: 'Antworten', itemFields: [
-        { key: 'text', type: 'text', label: 'Antworttext', required: true },
+        { key: 'text', type: 'richtext', label: 'Antworttext', required: true },
         { key: 'correct', type: 'checkbox', label: 'Korrekt' },
         { key: 'tip', type: 'text', label: 'Hinweis (optional)' },
       ]},
