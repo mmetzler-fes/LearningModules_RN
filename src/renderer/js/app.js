@@ -2617,7 +2617,7 @@ function createTypePreview(type, content, options = {}) {
     }
     case 'markTheWords': {
       div.innerHTML = `<div style="padding:20px; background:var(--bg-primary); border-radius:var(--radius-md);">
-        ${content.taskDescription ? `<p style="margin-bottom:16px;">${escapeHtml(content.taskDescription)}</p>` : ''}
+        ${content.taskDescription ? `<div style="margin-bottom:16px;">${sanitizeModuleDescriptionHtml(content.taskDescription)}</div>` : ''}
         ${renderModuleImage(content)}
         <div id="wordsArea" style="line-height:2.2;"></div>
         ${suppressFeedback ? '' : '<button class="btn btn-primary btn-sm" style="margin-top:16px;" id="wordsCheck">Überprüfen</button><div id="wordsFeedback" style="margin-top:12px;"></div>'}
@@ -2738,7 +2738,7 @@ function createTypePreview(type, content, options = {}) {
       const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
       div.innerHTML = `<div class="dnd-player">
-        ${content.taskDescription ? `<p class="dnd-player-desc">${escapeHtml(content.taskDescription)}</p>` : ''}
+        ${content.taskDescription ? `<div class="dnd-player-desc" style="margin-bottom:16px;">${sanitizeModuleDescriptionHtml(content.taskDescription)}</div>` : ''}
         <div class="dnd-player-draggables" id="dndDraggables"></div>
         <div class="dnd-player-canvas-wrap">
           ${hasImage
@@ -2750,7 +2750,13 @@ function createTypePreview(type, content, options = {}) {
               </div>`
           }
         </div>
-        <div id="dndFeedback" style="margin-top:16px;"></div>
+        ${suppressFeedback ? '' : `
+          <div style="display:flex; align-items:center; gap:12px; margin-top:16px;">
+            <button class="btn btn-primary btn-sm" id="dndCheck">Überprüfen</button>
+            <button class="btn btn-secondary btn-sm" id="dndNext">Weiter →</button>
+          </div>
+          <div id="dndFeedback" style="margin-top:12px;"></div>
+        `}
       </div>`;
 
       const canvasEl = div.querySelector('#dndCanvas');
@@ -2866,6 +2872,57 @@ function createTypePreview(type, content, options = {}) {
         const originalDrag = createDraggableNode(false);
         dragsEl.appendChild(originalDrag);
       });
+
+      if (!suppressFeedback) {
+        const dndCheckBtn = div.querySelector('#dndCheck');
+        if (dndCheckBtn) {
+          dndCheckBtn.addEventListener('click', () => {
+            const zoneEls = (hasImage ? canvasEl : div.querySelector('#dndZonesLegacy')).querySelectorAll('.dnd-player-zone');
+            let correct = 0;
+            let totalScored = 0;
+            zoneEls.forEach((z, idx) => {
+              const expected = zones.find(zz => zz.label === z.dataset.zone)?.correctDraggable || '';
+              const items = z.querySelectorAll('.dnd-player-drag.placed');
+              const defaultColor = colors[idx % colors.length];
+              
+              if (expected) {
+                totalScored++;
+                let hasCorrect = false;
+                let anyWrong = false;
+                for (const item of items) {
+                  if (item.textContent === expected) hasCorrect = true;
+                  else anyWrong = true;
+                }
+                
+                if (hasCorrect && !anyWrong) {
+                  z.style.borderColor = 'green';
+                  correct++;
+                } else {
+                  z.style.borderColor = 'red';
+                }
+              } else {
+                if (items.length > 0) {
+                  z.style.borderColor = 'red';
+                } else {
+                  z.style.borderColor = defaultColor;
+                }
+              }
+            });
+            const dndFeedback = div.querySelector('#dndFeedback');
+            if (dndFeedback) {
+              dndFeedback.innerHTML = `<span style="font-weight:600;">${correct} von ${totalScored || zones.length} richtig</span>`;
+            }
+          });
+        }
+
+        const dndNextBtn = div.querySelector('#dndNext');
+        if (dndNextBtn) {
+          dndNextBtn.addEventListener('click', () => {
+            const globalNextBtn = document.getElementById('btnQuizNext');
+            if (globalNextBtn) globalNextBtn.click();
+          });
+        }
+      }
       break;
     }
     case 'iframeEmbedder': {
