@@ -1397,6 +1397,38 @@ ipcMain.handle('reorder-modules', (_event, topicId, moduleIds) => {
   return { success: true };
 });
 
+ipcMain.handle('transfer-modules', (_event, sourceTopicId, targetTopicId, moduleIds, mode) => {
+  const db = loadDB();
+  const sourceTopic = db.topics.find((t) => t.id === sourceTopicId);
+  const targetTopic = db.topics.find((t) => t.id === targetTopicId);
+  if (!sourceTopic || !targetTopic) return { success: false, error: 'Thema nicht gefunden' };
+
+  if (!sourceTopic.modules) sourceTopic.modules = [];
+  if (!targetTopic.modules) targetTopic.modules = [];
+
+  const modulesToTransfer = sourceTopic.modules.filter((m) => moduleIds.includes(m.id));
+  if (modulesToTransfer.length === 0) return { success: false, error: 'Keine Module ausgewählt' };
+
+  if (mode === 'move') {
+    for (const mod of modulesToTransfer) {
+      targetTopic.modules.push(mod);
+    }
+    sourceTopic.modules = sourceTopic.modules.filter((m) => !moduleIds.includes(m.id));
+  } else if (mode === 'copy') {
+    for (const mod of modulesToTransfer) {
+      const cloned = JSON.parse(JSON.stringify(mod));
+      cloned.id = 'mod_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+      cloned.title = `${cloned.title} (Kopie)`;
+      targetTopic.modules.push(cloned);
+    }
+  } else {
+    return { success: false, error: 'Ungültiger Modus' };
+  }
+
+  saveDB(db);
+  return { success: true, count: modulesToTransfer.length };
+});
+
 // --- IPC: Export/Import (per topic) ---
 
 ipcMain.handle('export-topic', async (_event, topicId) => {

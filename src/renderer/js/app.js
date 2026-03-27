@@ -127,9 +127,10 @@ const modulesViewTitle = document.getElementById('modulesViewTitle');
 const searchModules = document.getElementById('searchModules');
 const filterType = document.getElementById('filterType');
 const btnCreateModule = document.getElementById('btnCreateModule');
-const btnExportCurrentTopic = document.getElementById('btnExportCurrentTopic');
 const btnImportModules = document.getElementById('btnImportModules');
+const btnExportCurrentTopic = document.getElementById('btnExportCurrentTopic');
 const btnExportModulesAsH5p = document.getElementById('btnExportModulesAsH5p');
+const btnTransferModules = document.getElementById('btnTransferModules');
 const modulesList = document.getElementById('modulesList');
 
 // Import Modules Modal
@@ -812,6 +813,10 @@ function updateModulesToolbarForTopicMode() {
     btnExportModulesAsH5p.disabled = isRaw;
     btnExportModulesAsH5p.title = isRaw ? 'Bei RAW-H5P Projekten ist der einzelne H5P-Export deaktiviert.' : 'Alle aktiven Module als einzelne H5P-Dateien exportieren';
   }
+  if (btnTransferModules) {
+    btnTransferModules.disabled = isRaw;
+    btnTransferModules.title = isRaw ? 'Bei RAW-H5P Projekten ist das Verschieben/Kopieren deaktiviert.' : 'Ausgewählte Module verschieben/kopieren';
+  }
 }
 
 btnNewTopic.addEventListener('click', () => {
@@ -1200,6 +1205,90 @@ importModulesBtnOk.addEventListener('click', async () => {
     showToast('Import fehlgeschlagen.', 'error');
   }
 });
+
+// --- Transfer Modules ---
+let transferSelectedModuleIds = [];
+let transferTargetTopicId = null;
+
+btnTransferModules.addEventListener('click', () => {
+  if (!currentTopicId) return;
+
+  transferSelectedModuleIds = currentTopicModules
+    .filter((m) => m.moduleSelected !== false)
+    .map((m) => m.id);
+
+  if (transferSelectedModuleIds.length === 0) {
+    showToast('Keine Module ausgewählt. Bitte aktiviere Module in der Übersicht, um sie zu übertragen.', 'error');
+    return;
+  }
+
+  const availableTopics = topics.filter((t) => t.id !== currentTopicId);
+  transferTopicList.innerHTML = '';
+  transferTargetTopicId = null;
+  transferModulesBtnMove.disabled = true;
+  transferModulesBtnCopy.disabled = true;
+
+  if (availableTopics.length === 0) {
+    transferTopicList.innerHTML = '<div class="empty-state"><p>Keine anderen Lernthemen verfügbar.</p></div>';
+  } else {
+    for (const t of availableTopics) {
+      const item = document.createElement('div');
+      item.className = 'import-module-item';
+      item.style.cursor = 'pointer';
+      item.innerHTML = `
+        <input type="radio" name="transferTarget" value="${t.id}" id="transfer_tgt_${t.id}" style="cursor:pointer;" />
+        <label for="transfer_tgt_${t.id}" style="cursor:pointer; flex: 1; padding-left: 10px;">
+          <span class="import-module-title">📚 ${escapeHtml(t.title)}</span>
+        </label>
+      `;
+      item.addEventListener('click', () => {
+        item.querySelector('input').checked = true;
+        transferTargetTopicId = t.id;
+        transferModulesBtnMove.disabled = false;
+        transferModulesBtnCopy.disabled = false;
+      });
+      const radio = item.querySelector('input');
+      radio.addEventListener('change', () => {
+        if (radio.checked) {
+          transferTargetTopicId = t.id;
+          transferModulesBtnMove.disabled = false;
+          transferModulesBtnCopy.disabled = false;
+        }
+      });
+      transferTopicList.appendChild(item);
+    }
+  }
+  
+  transferModulesHint.textContent = `${transferSelectedModuleIds.length} Modul(e) ausgewählt. Wähle das Ziel-Thema aus:`;
+  transferModulesOverlay.classList.remove('hidden');
+});
+
+transferModulesBtnCancel.addEventListener('click', () => {
+  transferModulesOverlay.classList.add('hidden');
+});
+
+async function handleTransfer(mode) {
+  if (!transferTargetTopicId || transferSelectedModuleIds.length === 0) return;
+  
+  const result = await appApi.transferModules(currentTopicId, transferTargetTopicId, transferSelectedModuleIds, mode);
+  
+  if (result && result.success) {
+    showToast(`${result.count} Modul(e) erfolgreich ${mode === 'move' ? 'verschoben' : 'kopiert'}.`, 'success');
+  } else {
+    showToast('Ein Fehler ist aufgetreten: ' + (result?.error || 'Unbekannt'), 'error');
+  }
+  
+  transferModulesOverlay.classList.add('hidden');
+  
+  // Refresh current topic and global topics list
+  topics = await appApi.getTopics();
+  refreshTopicsList();
+  currentTopicModules = await appApi.getTopicModules(currentTopicId);
+  refreshModulesList();
+}
+
+transferModulesBtnMove.addEventListener('click', () => handleTransfer('move'));
+transferModulesBtnCopy.addEventListener('click', () => handleTransfer('copy'));
 
 // ==================== MODULE FORM ====================
 
