@@ -1718,12 +1718,18 @@ function collectQuizAnswer(mod) {
       const zones = quizModuleContainer.querySelectorAll('.dtw-drop-zone');
       let correct = 0;
       const total = zones.length;
+      const placements = [];
       zones.forEach((z) => {
         const current = (z.dataset.currentWord || '').trim();
         const expected = z.dataset.correctWord;
-        if (current.toLowerCase() === expected.toLowerCase()) correct++;
+        const isCorrect = current.toLowerCase() === expected.toLowerCase();
+        if (isCorrect) correct++;
+        placements.push(`${current || '(leer)'} → ${expected}`);
       });
-      result.userAnswer = `${correct}/${total} richtig zugeordnet`;
+      const percent = total > 0 ? Math.round((correct / total) * 100) : 0;
+      result.userAnswer = `${correct}/${total} richtig zugeordnet (${percent}%)`;
+      result.placements = placements;
+      result.percent = percent;
       result.correctAnswer = `${total}/${total}`;
       result.isCorrect = correct === total && total > 0;
       break;
