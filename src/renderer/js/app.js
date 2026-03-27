@@ -2548,8 +2548,19 @@ function createTypePreview(type, content, options = {}) {
               });
               fragment.appendChild(dropZone);
             } else if (part) {
-              fragment.appendChild(document.createTextNode(part));
+              // Statischen Text als nicht auswählbar markieren
+              const staticSpan = document.createElement('span');
+              staticSpan.className = 'dtw-static-text';
+              staticSpan.textContent = part;
+              staticSpan.setAttribute('unselectable', 'on');
+              staticSpan.style.userSelect = 'none';
+              staticSpan.style.webkitUserSelect = 'none';
+              fragment.appendChild(staticSpan);
             }
+          // CSS für nicht auswählbaren statischen Text ergänzen
+          const dtwStyle = document.createElement('style');
+          dtwStyle.textContent = `.dtw-static-text { user-select: none; -webkit-user-select: none; }`;
+          document.head.appendChild(dtwStyle);
           });
           textNode.parentNode.replaceChild(fragment, textNode);
         }
