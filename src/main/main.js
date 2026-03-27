@@ -1128,6 +1128,8 @@ function startWebServer() {
     const resultData = req.body;
     resultData.id = db.nextResultId++;
     resultData.timestamp = new Date().toISOString();
+    resultData.ipAddress = req.ip || req.connection.remoteAddress || '';
+    resultData.systemUsername = 'WLAN-Gerät';
     db.results.push(resultData);
     saveDB(db);
     res.json({ success: true, id: resultData.id });
@@ -1586,6 +1588,14 @@ ipcMain.handle('save-quiz-result', (_event, resultData) => {
   const db = loadDB();
   resultData.id = db.nextResultId++;
   resultData.timestamp = new Date().toISOString();
+  
+  resultData.ipAddress = getPreferredIP() || 'localhost';
+  try {
+    resultData.systemUsername = os.userInfo().username;
+  } catch (e) {
+    resultData.systemUsername = 'Unbekannt';
+  }
+
   db.results.push(resultData);
   saveDB(db);
   return { success: true, id: resultData.id };

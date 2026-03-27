@@ -174,6 +174,7 @@ const quizProgressFill = document.getElementById('quizProgressFill');
 const quizInfo = document.getElementById('quizInfo');
 const quizModuleContainer = document.getElementById('quizModuleContainer');
 const quizActions = document.getElementById('quizActions');
+const btnQuizPrev = document.getElementById('btnQuizPrev');
 const btnQuizNext = document.getElementById('btnQuizNext');
 const btnQuizCancel = document.getElementById('btnQuizCancel');
 const quizResultArea = document.getElementById('quizResultArea');
@@ -1473,6 +1474,10 @@ async function refreshResults() {
       <div class="result-card-header">
         <div class="result-card-info">
           <strong>${escapeHtml(r.username)}</strong>
+          <span style="font-size: 0.85em; color: var(--text-secondary); margin-left: 5px;">
+            ${r.systemUsername ? `[${escapeHtml(r.systemUsername)}]` : ''} ${r.ipAddress ? `(${escapeHtml(r.ipAddress)})` : ''}
+          </span>
+          <br>
           <span class="result-topic-name">${escapeHtml(r.topicTitle || '—')}</span>
           <span class="result-date">${new Date(r.timestamp).toLocaleString('de-DE')}</span>
         </div>
@@ -1666,6 +1671,24 @@ function renderQuizModule() {
 
   // Button text
   btnQuizNext.textContent = currentIndex < modules.length - 1 ? t('quiz.next') : t('quiz.finish');
+  
+  if (btnQuizPrev) {
+    const isExam = examModeEnabled && currentUser && currentUser.role === 'student';
+    btnQuizPrev.style.display = (!isExam && currentIndex > 0) ? 'inline-block' : 'none';
+  }
+}
+
+if (btnQuizPrev) {
+  btnQuizPrev.addEventListener('click', () => {
+    if (!quizState || quizState.currentIndex <= 0) return;
+    
+    // Auto-save the current state before going back (optional, but good so they don't lose progress if they go back)
+    const mod = quizState.modules[quizState.currentIndex];
+    quizState.answers[quizState.currentIndex] = collectQuizAnswer(mod);
+    
+    quizState.currentIndex--;
+    renderQuizModule();
+  });
 }
 
 btnQuizNext.addEventListener('click', () => {
@@ -1674,7 +1697,7 @@ btnQuizNext.addEventListener('click', () => {
   // Collect answer for current module
   const mod = quizState.modules[quizState.currentIndex];
   const answer = collectQuizAnswer(mod);
-  quizState.answers.push(answer);
+  quizState.answers[quizState.currentIndex] = answer;
 
   quizState.currentIndex++;
 
@@ -1794,12 +1817,22 @@ function collectQuizAnswer(mod) {
       const spans = quizModuleContainer.querySelectorAll('#wordsArea span');
       let correct = 0;
       let total = 0;
+      const userSelected = [];
+      const correctWords = [];
       spans.forEach((s) => {
-        if (s.dataset.correct === 'true') total++;
-        if (s.classList.contains('selected') && s.dataset.correct === 'true') correct++;
+        const isCorrectTarget = s.dataset.correct === 'true';
+        const isSelected = s.classList.contains('selected');
+        if (isCorrectTarget) {
+            total++;
+            correctWords.push(s.textContent);
+        }
+        if (isSelected) {
+            userSelected.push(s.textContent);
+            if (isCorrectTarget) correct++;
+        }
       });
-      result.userAnswer = `${correct}/${total} markiert`;
-      result.correctAnswer = `${total}/${total}`;
+      result.userAnswer = userSelected.length ? userSelected.join(', ') : 'Keine markiert';
+      result.correctAnswer = correctWords.join(', ');
       result.isCorrect = correct === total && total > 0;
       break;
     }
@@ -1807,19 +1840,20 @@ function collectQuizAnswer(mod) {
       const zones = quizModuleContainer.querySelectorAll('.dtw-drop-zone');
       let correct = 0;
       const total = zones.length;
-      const placements = [];
+      const userAnswers = [];
+      const correctAnswers = [];
       zones.forEach((z) => {
         const current = (z.dataset.currentWord || '').trim();
         const expected = z.dataset.correctWord;
         const isCorrect = current.toLowerCase() === expected.toLowerCase();
         if (isCorrect) correct++;
-        placements.push(`${current || '(leer)'} → ${expected}`);
+        userAnswers.push(`${current || '(leer)'}`);
+        correctAnswers.push(`${expected}`);
       });
       const percent = total > 0 ? Math.round((correct / total) * 100) : 0;
-      result.userAnswer = `${correct}/${total} richtig zugeordnet (${percent}%)`;
-      result.placements = placements;
+      result.userAnswer = userAnswers.join(', ');
+      result.correctAnswer = correctAnswers.join(', ');
       result.percent = percent;
-      result.correctAnswer = `${total}/${total}`;
       result.isCorrect = correct === total && total > 0;
       break;
     }
@@ -2026,6 +2060,9 @@ function renderModuleImage(content, options = {}) {
 function createTypePreview(type, content, options = {}) {
   const suppressFeedback = !!(options.quizMode && options.examMode);
   const div = document.createElement('div');
+  
+  const globalNextBtn = document.getElementById('btnQuizNext');
+  if (globalNextBtn) globalNextBtn.disabled = false;
 
   switch (type) {
     case 'accordion': {
@@ -2142,7 +2179,16 @@ function createTypePreview(type, content, options = {}) {
       const tfFalse = div.querySelector('#tfFalse');
       const tfResults = tfQuestions.map(() => null); // null = unanswered
 
+      if (tfQuestions.length > 1) {
+        const globalNextBtn = document.getElementById('btnQuizNext');
+        if (globalNextBtn) globalNextBtn.disabled = true;
+      }
+
       const showTfQuestion = () => {
+        if (tfIdx === tfQuestions.length - 1) {
+          const globalNextBtn = document.getElementById('btnQuizNext');
+          if (globalNextBtn) globalNextBtn.disabled = false;
+        }
         const q = tfQuestions[tfIdx];
         tfQuestion.textContent = q.question || '';
         tfProgress.textContent = `Frage ${tfIdx + 1} von ${tfQuestions.length}`;
@@ -2422,8 +2468,17 @@ function createTypePreview(type, content, options = {}) {
           }
         };
 
+        if (cards.length > 1) {
+          const globalNextBtn = document.getElementById('btnQuizNext');
+          if (globalNextBtn) globalNextBtn.disabled = true;
+        }
+
         showCardMedia(cards[0]);
         const updateCard = () => {
+          if (idx === cards.length - 1) {
+            const globalNextBtn = document.getElementById('btnQuizNext');
+            if (globalNextBtn) globalNextBtn.disabled = false;
+          }
           flipped = false;
           cardDisplay.textContent = cards[idx][frontKey] || '';
           cardDisplay.style.background = 'var(--accent-light)';
@@ -2446,7 +2501,11 @@ function createTypePreview(type, content, options = {}) {
         ${content.taskDescription ? `<div style="margin-bottom:16px;">${sanitizeModuleDescriptionHtml(content.taskDescription)}</div>` : ''}
         ${renderModuleImage(content)}
         <div id="blanksArea"></div>
-        ${suppressFeedback ? '' : '<button class="btn btn-primary btn-sm" style="margin-top:16px;" id="blanksCheck">Überprüfen</button><div id="blanksFeedback" style="margin-top:12px;"></div>'}
+        <div style="display:flex; align-items:center; gap:12px; margin-top:16px;">
+          ${suppressFeedback ? '' : '<button class="btn btn-primary btn-sm" id="blanksCheck">Überprüfen</button>'}
+          <button class="btn btn-secondary btn-sm" id="blanksNext">Weiter →</button>
+        </div>
+        ${suppressFeedback ? '' : '<div id="blanksFeedback" style="margin-top:12px;"></div>'}
       </div>`;
       const blanksArea = div.querySelector('#blanksArea');
       const answerMap = [];
@@ -2497,6 +2556,14 @@ function createTypePreview(type, content, options = {}) {
         });
         div.querySelector('#blanksFeedback').innerHTML = `<span style="font-weight:600;">${correct} von ${answerMap.length} richtig</span>`;
       });
+      
+      const blanksNextBtn = div.querySelector('#blanksNext');
+      if (blanksNextBtn) {
+        blanksNextBtn.addEventListener('click', () => {
+          const globalNextBtn = document.getElementById('btnQuizNext');
+          if (globalNextBtn) globalNextBtn.click();
+        });
+      }
       break;
     }
     case 'essay': {
@@ -2797,7 +2864,17 @@ function createTypePreview(type, content, options = {}) {
       `;
       const slideContent = div.querySelector('#slideContent');
       const slideCounter = div.querySelector('#slideCounter');
+
+      if (slides.length > 1) {
+        const globalNextBtn = document.getElementById('btnQuizNext');
+        if (globalNextBtn) globalNextBtn.disabled = true;
+      }
+
       const updateSlide = () => {
+        if (sIdx === slides.length - 1) {
+          const globalNextBtn = document.getElementById('btnQuizNext');
+          if (globalNextBtn) globalNextBtn.disabled = false;
+        }
         const slide = slides[sIdx];
         slideContent.innerHTML = `<h3 style="margin-bottom:12px;">${escapeHtml(slide.slideTitle || '')}</h3><div>${slide.slideContent || ''}</div>`;
         slideCounter.textContent = `${sIdx + 1} / ${slides.length}`;
@@ -2856,13 +2933,11 @@ function createTypePreview(type, content, options = {}) {
               </div>`
           }
         </div>
-        ${suppressFeedback ? '' : `
-          <div style="display:flex; align-items:center; gap:12px; margin-top:16px;">
-            <button class="btn btn-primary btn-sm" id="dndCheck">Überprüfen</button>
-            <button class="btn btn-secondary btn-sm" id="dndNext">Weiter →</button>
-          </div>
-          <div id="dndFeedback" style="margin-top:12px;"></div>
-        `}
+        <div style="display:flex; align-items:center; gap:12px; margin-top:16px;">
+          ${suppressFeedback ? '' : '<button class="btn btn-primary btn-sm" id="dndCheck">Überprüfen</button>'}
+          <button class="btn btn-secondary btn-sm" id="dndNext">Weiter →</button>
+        </div>
+        ${suppressFeedback ? '' : '<div id="dndFeedback" style="margin-top:12px;"></div>'}
       </div>`;
 
       const canvasEl = div.querySelector('#dndCanvas');
@@ -3214,7 +3289,16 @@ function startArithmeticQuiz(container, content, suppressFeedback) {
   let qIdx = 0;
   let score = 0;
 
+  if (questions.length > 1) {
+    const globalNextBtn = document.getElementById('btnQuizNext');
+    if (globalNextBtn) globalNextBtn.disabled = true;
+  }
+
   const render = () => {
+    if (qIdx >= questions.length - 1) {
+      const globalNextBtn = document.getElementById('btnQuizNext');
+      if (globalNextBtn) globalNextBtn.disabled = false;
+    }
     if (qIdx >= questions.length) {
       container.innerHTML = suppressFeedback
         ? `<h3>Alle Fragen beantwortet.</h3>`
