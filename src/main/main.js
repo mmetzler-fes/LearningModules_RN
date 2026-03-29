@@ -1525,6 +1525,14 @@ function startWebServer() {
       return res.status(403).json({ error: 'Keine Berechtigung' });
     }
     if (target.id === req.authUser.id) return res.status(400).json({ error: 'Eigenes Konto kann nicht gelöscht werden' });
+
+    if (target.role === 'admin') {
+      const adminCount = db.users.filter(u => u.role === 'admin').length;
+      if (adminCount <= 1) {
+        return res.status(400).json({ error: 'Der letzte Administrator kann nicht gelöscht werden' });
+      }
+    }
+
     db.users.splice(idx, 1);
     saveDB(db);
     res.json({ success: true });
@@ -2024,6 +2032,15 @@ ipcMain.handle('delete-user', (_event, userId) => {
   const db = loadDB();
   const idx = db.users.findIndex(u => u.id === userId);
   if (idx < 0) return { success: false, error: 'Benutzer nicht gefunden' };
+
+  const target = db.users[idx];
+  if (target.role === 'admin') {
+    const adminCount = db.users.filter(u => u.role === 'admin').length;
+    if (adminCount <= 1) {
+      return { success: false, error: 'Der letzte Administrator kann nicht gelöscht werden' };
+    }
+  }
+
   db.users.splice(idx, 1);
   saveDB(db);
   return { success: true };
