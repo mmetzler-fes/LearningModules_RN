@@ -1326,6 +1326,48 @@ function startWebServer() {
   const upload = multer({ dest: os.tmpdir() });
 
   /**
+   * POST /api/admin/module-import
+   * Admin/Lehrer können eine JSON-Datei hochladen, um Module in ein Thema zu importieren.
+   * Erwartet: multipart/form-data mit 'file' (.json) und 'topicId'
+   */
+  web.post('/api/admin/module-import', requireAuth(['admin', 'teacher']), upload.single('file'), (req, res) => {
+    const topicId = req.body.topicId;
+    if (!req.file) return res.status(400).json({ error: 'Keine Datei hochgeladen' });
+    if (!topicId) return res.status(400).json({ error: 'Kein topicId angegeben' });
+    let importData;
+    try {
+      importData = JSON.parse(fs.readFileSync(req.file.path, 'utf-8'));
+    } catch (e) {
+      return res.status(400).json({ error: 'Ungültiges JSON-Format: ' + e.message });
+    }
+    let importModules = [];
+    if (importData.topic && importData.topic.modules) {
+      importModules = importData.topic.modules;
+    } else if (importData.modules && Array.isArray(importData.modules)) {
+      importModules = importData.modules;
+    }
+    if (importModules.length === 0) {
+      return res.status(400).json({ error: 'Keine Module in der Datei gefunden' });
+    }
+    const db = loadDB();
+    const topic = db.topics.find(t => t.id === topicId);
+    if (!topic) return res.status(404).json({ error: 'Thema nicht gefunden' });
+    if (!topic.modules) topic.modules = [];
+    // IDs für neue Module generieren
+    const newModules = importModules.map((m) => ({
+      ...m,
+      id: 'mod_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
+      moduleSelected: true,
+      createdAt: m.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }));
+    topic.modules.push(...newModules);
+    saveDB(db);
+    res.json({ success: true, importedCount: newModules.length });
+  });
+
+
+  /**
    * POST /api/admin/user-import
    * Admin/Lehrer können eine Excel- oder CSV-Datei hochladen, um Nutzer zu importieren.
    * Erwartete Spalten: login, password, class, role, firstname, lastname, email
