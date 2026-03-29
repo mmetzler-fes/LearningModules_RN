@@ -1327,32 +1327,57 @@ function startWebServer() {
 
   /**
    * POST /api/admin/module-import
-   * Admin/Lehrer können eine JSON-Datei hochladen, um Module in ein Thema zu importieren.
-   * Erwartet: multipart/form-data mit 'file' (.json) und 'topicId'
+   * Admin/Lehrer können eine JSON-Datei hochladen, um Module (oder ein ganzes Thema) zu importieren.
+   * Erwartet: multipart/form-data mit 'file' (.json) und optional 'topicId'.
+   * Falls 'topicId' fehlt, wird ein neues Thema angelegt.
    */
   web.post('/api/admin/module-import', requireAuth(['admin', 'teacher']), upload.single('file'), (req, res) => {
-    const topicId = req.body.topicId;
+    let topicId = req.body.topicId;
     if (!req.file) return res.status(400).json({ error: 'Keine Datei hochgeladen' });
-    if (!topicId) return res.status(400).json({ error: 'Kein topicId angegeben' });
+
     let importData;
     try {
       importData = JSON.parse(fs.readFileSync(req.file.path, 'utf-8'));
     } catch (e) {
       return res.status(400).json({ error: 'Ungültiges JSON-Format: ' + e.message });
     }
+
     let importModules = [];
-    if (importData.topic && importData.topic.modules) {
-      importModules = importData.topic.modules;
+    let topicTitle = 'Importiertes Thema';
+    let topicDesc = '';
+
+    if (importData.topic) {
+      importModules = importData.topic.modules || [];
+      topicTitle = importData.topic.title || topicTitle;
+      topicDesc = importData.topic.description || '';
     } else if (importData.modules && Array.isArray(importData.modules)) {
       importModules = importData.modules;
     }
+
     if (importModules.length === 0) {
       return res.status(400).json({ error: 'Keine Module in der Datei gefunden' });
     }
+
     const db = loadDB();
-    const topic = db.topics.find(t => t.id === topicId);
-    if (!topic) return res.status(404).json({ error: 'Thema nicht gefunden' });
-    if (!topic.modules) topic.modules = [];
+    let topic;
+
+    if (!topicId) {
+      // Neues Thema anlegen
+      topic = {
+        id: 'topic_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
+        title: topicTitle,
+        description: topicDesc,
+        selected: false,
+        createdAt: new Date().toISOString(),
+        modules: []
+      };
+      db.topics.push(topic);
+    } else {
+      topic = db.topics.find(t => t.id === topicId);
+      if (!topic) return res.status(404).json({ error: 'Thema nicht gefunden' });
+      if (!topic.modules) topic.modules = [];
+    }
+
     // IDs für neue Module generieren
     const newModules = importModules.map((m) => ({
       ...m,
@@ -1361,9 +1386,18 @@ function startWebServer() {
       createdAt: m.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }));
+
     topic.modules.push(...newModules);
     saveDB(db);
-    res.json({ success: true, importedCount: newModules.length });
+
+    // Return format matching the Electron IPC for consistency in app.js
+    res.json({
+      success: true,
+      importedCount: newModules.length,
+      topicTitle: topic.title,
+      modules: newModules.map(m => ({ id: m.id, title: m.title, type: m.type, description: m.description || '' })),
+      _fullModules: newModules
+    });
   });
 
 

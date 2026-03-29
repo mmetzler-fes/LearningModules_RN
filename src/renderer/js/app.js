@@ -121,9 +121,77 @@ const browserApi = {
     a.download = `${t.title || 'topic'}.json`; a.click();
     return { success: true };
   }),
-  importTopic: () => Promise.resolve({ success: false, error: 'Bitte H5P-Upload verwenden' }),
-  importModulesToTopic: () => Promise.resolve(null),
-  confirmImportModules: () => Promise.resolve({ success: false }),
+  importTopic: () => new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return resolve({ success: false });
+      const formData = new FormData();
+      formData.append('file', file);
+      const token = authStore.getToken();
+      const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+      try {
+        const res = await fetch('/api/admin/module-import', { method: 'POST', headers, body: formData });
+        const data = await res.json();
+        if (data.success) {
+          resolve({ success: true, topicTitle: data.topicTitle, importedCount: data.importedCount });
+        } else {
+          resolve({ success: false, error: data.error || 'Unbekannter Fehler' });
+        }
+      } catch (err) {
+        resolve({ success: false, error: err.message });
+      }
+    };
+    input.click();
+  }),
+  importModulesToTopic: (topicId) => new Promise((resolve) => {
+    // Datei-Dialog für JSON-Import
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return resolve({ success: false });
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('topicId', topicId);
+      const token = authStore.getToken();
+      const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+      try {
+        const res = await fetch('/api/admin/module-import', { method: 'POST', headers, body: formData });
+        const data = await res.json();
+        if (data.success) {
+          // Return modules and _fullModules for the preview modal in app.js
+          resolve({
+            success: true,
+            importedCount: data.importedCount,
+            modules: data.modules,
+            _fullModules: data._fullModules
+          });
+        } else {
+          resolve({ success: false, error: data.error || 'Unbekannter Fehler' });
+        }
+      } catch (err) {
+        resolve({ success: false, error: err.message });
+      }
+    };
+    input.click();
+  }),
+  confirmImportModules: (topicId, modules) => {
+    // Speichere Module im lokalen Topic (Browser-Modus)
+    let topics = [];
+    try {
+      topics = JSON.parse(localStorage.getItem('lm_topics') || '[]');
+    } catch {}
+    const topic = topics.find((t) => t.id === topicId);
+    if (!topic) return Promise.resolve({ success: false, error: 'Thema nicht gefunden' });
+    if (!topic.modules) topic.modules = [];
+    topic.modules.push(...modules);
+    localStorage.setItem('lm_topics', JSON.stringify(topics));
+    return Promise.resolve({ success: true });
+  },
 
   // H5P import via browser file picker
   importH5p: (options) => new Promise((resolve) => {
@@ -1107,7 +1175,7 @@ btnNewTopic.addEventListener('click', () => {
 btnImportTopic.addEventListener('click', async () => {
   const result = await appApi.importTopic();
   if (result.success) {
-    showToast(t('topics.import.success', { title: result.topicTitle, count: result.importedCount }), 'success');
+    showToast(t('topics.import.success', { title: result.topicTitle || 'Thema', count: result.importedCount }), 'success');
     refreshTopicsList();
   } else if (result.error) {
     showToast(t('topics.import.error') + result.error, 'error');
@@ -1432,6 +1500,14 @@ btnImportModules.addEventListener('click', async () => {
   const result = await appApi.importModulesToTopic(currentTopicId);
   if (!result || !result.success) return;
 
+  // Im Browser-Modus (REST API) wurden die Module bereits direkt gespeichert
+  if (!isElectron) {
+    showToast(`${result.importedCount} Modul(e) importiert.`, 'success');
+    await loadTopicModules(currentTopicId);
+    return;
+  }
+
+  // Electron-Modus: Zeige Vorschau-Modal
   pendingImportModules = result._fullModules || [];
   const modules = result.modules || [];
 
