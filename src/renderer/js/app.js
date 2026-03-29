@@ -1,49 +1,171 @@
 /**
  * LearningModules v2.0 - Main Application Logic
- * Features: Teacher/Student Login, Topic Management, Quiz Mode with Results
- * Supports: Electron (full) + Browser via WLAN (student read-only)
+ * Features: Multi-user Auth (admin/teacher/student), Role-based RBAC,
+ *           Class Management, Topic Permissions, H5P Browser Upload
+ * Supports: Electron (full) + Browser/Server mode (all features via REST API)
  */
 
 // --- Browser vs Electron detection ---
 const isElectron = !!(window.api && window.api.getTopics);
 
+// --- Auth token storage (browser mode uses localStorage) ---
+const authStore = {
+  _token: null,
+  getToken() { return this._token || localStorage.getItem('lm_token'); },
+  setToken(t) { this._token = t; if (t) localStorage.setItem('lm_token', t); else localStorage.removeItem('lm_token'); },
+  getHeaders() {
+    const t = this.getToken();
+    return t ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${t}` } : { 'Content-Type': 'application/json' };
+  },
+  authFetch(url, opts = {}) {
+    return fetch(url, { ...opts, headers: { ...(opts.headers || {}), ...this.getHeaders() } }).then(r => {
+      if (r.status === 401) { authStore.setToken(null); showLoginScreen(); }
+      return r.json();
+    });
+  },
+};
+
 // --- REST API fallback for browser mode ---
 const browserApi = {
-  // Student-accessible endpoints
-  getSelectedTopics: () => fetch('/api/selected-topics').then(r => r.json()),
-  getTopicModules: (topicId) => fetch(`/api/topics/${encodeURIComponent(topicId)}/modules`).then(r => r.json()),
-  getStudentSelections: (username) => fetch(`/api/student-selections/${encodeURIComponent(username)}`).then(r => r.json()),
-  saveStudentSelections: (username, topicIds) => fetch(`/api/student-selections/${encodeURIComponent(username)}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topicIds })
+  // Auth
+  login: (username, password) => fetch('/api/auth/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password })
   }).then(r => r.json()),
-  saveQuizResult: (resultData) => fetch('/api/quiz-result', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(resultData)
-  }).then(r => r.json()),
+  getAuthSettings: () => fetch('/api/auth/settings').then(r => r.json()),
+  verifyAdmin: async (username, password) => {
+    const res = await browserApi.login(username, password);
+    if (res.token && (res.role === 'admin' || res.role === 'teacher')) {
+      authStore.setToken(res.token);
+      return res;
+    }
+    return false;
+  },
+  getAdminCredentials: () => Promise.resolve({ username: 'admin' }),
+  updateAdminPassword: (newPassword) => authStore.authFetch('/api/admin/users', {
+    method: 'PUT', body: JSON.stringify({ password: newPassword })
+  }),
 
-  // Not available in browser — return safe defaults
-  verifyAdmin: () => Promise.resolve(false),
-  getTopics: () => fetch('/api/selected-topics').then(r => r.json()),
+  // User Management (admin/teacher)
+  getAllUsers: () => authStore.authFetch('/api/admin/users'),
+  saveUser: (userData) => {
+    if (userData.id) {
+      return authStore.authFetch(`/api/admin/users/${userData.id}`, { method: 'PUT', body: JSON.stringify(userData) });
+    }
+    return authStore.authFetch('/api/admin/users', { method: 'POST', body: JSON.stringify(userData) });
+  },
+  deleteUser: (userId) => authStore.authFetch(`/api/admin/users/${userId}`, { method: 'DELETE' }),
+  importUsers: async () => {
+    return new Promise((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file'; input.accept = '.xlsx,.csv';
+      input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return resolve({ success: false });
+        const formData = new FormData();
+        formData.append('file', file);
+        const token = authStore.getToken();
+        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        try {
+          const res = await fetch('/api/admin/user-import', { method: 'POST', headers, body: formData });
+          const data = await res.json();
+          resolve(data);
+        } catch (err) { resolve({ success: false, error: err.message }); }
+      };
+      input.click();
+    });
+  },
+
+  // Class Management (admin/teacher)
+  getAllClasses: () => authStore.authFetch('/api/admin/classes'),
+  saveClass: (classData) => {
+    if (classData.id) {
+      return authStore.authFetch(`/api/admin/classes/${classData.id}`, { method: 'PUT', body: JSON.stringify(classData) });
+    }
+    return authStore.authFetch('/api/admin/classes', { method: 'POST', body: JSON.stringify(classData) });
+  },
+  deleteClass: (classId) => authStore.authFetch(`/api/admin/classes/${classId}`, { method: 'DELETE' }),
+
+  // App Settings
+  getAppSettings: () => authStore.authFetch('/api/admin/settings'),
+  saveAppSettings: (settings) => authStore.authFetch('/api/admin/settings', { method: 'POST', body: JSON.stringify(settings) }),
+
+  // Topics (teacher/admin full access)
+  getTopics: () => authStore.authFetch('/api/admin/topics'),
   getExamMode: () => fetch('/api/exam-mode').then(r => r.json()),
-  setExamMode: () => Promise.resolve({ success: false, enabled: false }),
-  getAdminCredentials: () => Promise.resolve({ username: '', password: '' }),
-  updateAdminPassword: () => Promise.resolve({ success: false }),
-  saveTopic: () => Promise.resolve({ success: false }),
-  deleteTopic: () => Promise.resolve({ success: false }),
-  toggleTopicSelection: () => Promise.resolve({ success: false }),
-  saveModule: () => Promise.resolve({ success: false }),
-  deleteModule: () => Promise.resolve({ success: false }),
-  toggleModuleSelection: () => Promise.resolve({ success: false }),
-  reorderModules: () => Promise.resolve({ success: false }),
-  exportTopic: () => Promise.resolve({ success: false }),
-  importTopic: () => Promise.resolve({ success: false }),
+  setExamMode: (enabled) => authStore.authFetch('/api/exam-mode', { method: 'POST', body: JSON.stringify({ enabled }) }),
+  saveTopic: (topicData) => authStore.authFetch('/api/admin/topics', { method: 'POST', body: JSON.stringify(topicData) }),
+  deleteTopic: (topicId) => authStore.authFetch(`/api/admin/topics/${topicId}`, { method: 'DELETE' }),
+  toggleTopicSelection: (topicId, selected) =>
+    authStore.authFetch(`/api/admin/topics/${encodeURIComponent(topicId)}`, {
+      method: 'PATCH', body: JSON.stringify({ selected })
+    }),
+  setTopicSharing: (topicId, sharedWith) =>
+    authStore.authFetch(`/api/admin/topics/${encodeURIComponent(topicId)}`, {
+      method: 'PATCH', body: JSON.stringify({ sharedWith })
+    }),
+
+  // Module CRUD (via topic save)
+  getTopicModules: (topicId) => authStore.authFetch(`/api/topics/${encodeURIComponent(topicId)}/modules`),
+  saveModule: () => Promise.resolve({ success: true }),   // handled client-side then topic save
+  deleteModule: () => Promise.resolve({ success: true }), // handled client-side then topic save
+  toggleModuleSelection: () => Promise.resolve({ success: true }),
+  reorderModules: () => Promise.resolve({ success: true }),
+  transferModules: () => Promise.resolve({ success: false, error: 'Im Browser-Modus nicht verfügbar' }),
+
+  // Export/Import (topic JSON)
+  exportTopic: (topicId) => authStore.authFetch(`/api/admin/topics`).then(topics => {
+    const t = topics.find(t => t.id === topicId);
+    if (!t) return { success: false };
+    const blob = new Blob([JSON.stringify({ topic: t }, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `${t.title || 'topic'}.json`; a.click();
+    return { success: true };
+  }),
+  importTopic: () => Promise.resolve({ success: false, error: 'Bitte H5P-Upload verwenden' }),
   importModulesToTopic: () => Promise.resolve(null),
   confirmImportModules: () => Promise.resolve({ success: false }),
-  importH5p: () => Promise.resolve({ success: false }),
-  exportTopicAsH5p: () => Promise.resolve({ success: false }),
-  exportSelectedModulesAsH5p: () => Promise.resolve({ success: false }),
-  getQuizResults: () => Promise.resolve([]),
-  deleteQuizResult: () => Promise.resolve({ success: false }),
-  deleteAllQuizResults: () => Promise.resolve({ success: false }),
+
+  // H5P import via browser file picker
+  importH5p: (options) => new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = '.h5p';
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return resolve({ success: false });
+      const formData = new FormData(); formData.append('file', file);
+      const token = authStore.getToken();
+      const headers = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      if (options && options.importMode) headers['X-Import-Mode'] = options.importMode;
+      try {
+        const res = await fetch('/api/h5p/upload', { method: 'POST', headers, body: formData });
+        const data = await res.json();
+        resolve(data);
+      } catch (e) { resolve({ success: false, error: e.message }); }
+    };
+    input.click();
+  }),
+  exportTopicAsH5p: () => Promise.resolve({ success: false, error: 'H5P-Export nur im Desktop-Modus' }),
+  exportSelectedModulesAsH5p: () => Promise.resolve({ success: false, error: 'H5P-Export nur im Desktop-Modus' }),
+
+  // Student selections
+  getSelectedTopics: () => authStore.authFetch('/api/selected-topics'),
+  getStudentSelections: (username) => authStore.authFetch(`/api/student-selections/${encodeURIComponent(username)}`),
+  saveStudentSelections: (username, topicIds) => authStore.authFetch(`/api/student-selections/${encodeURIComponent(username)}`, {
+    method: 'POST', body: JSON.stringify({ topicIds })
+  }),
+  saveQuizResult: (resultData) => authStore.authFetch('/api/quiz-result', { method: 'POST', body: JSON.stringify(resultData) }),
+
+  // Quiz results (teacher/admin)
+  getQuizResults: () => authStore.authFetch('/api/quiz-results'),
+  deleteQuizResult: (resultId) => authStore.authFetch(`/api/quiz-results/${resultId}`, { method: 'DELETE' }),
+  deleteAllQuizResults: () => authStore.authFetch('/api/quiz-results', { method: 'DELETE' }),
+
+  // Topic permissions
+  setTopicPermissions: (topicId, permissions) => authStore.authFetch('/api/admin/topic-permissions', {
+    method: 'POST', body: JSON.stringify({ topicId, ...permissions })
+  }),
+
   getH5pContentPath: () => Promise.resolve(''),
   selectImage: () => Promise.resolve({ success: false }),
   selectAudio: () => Promise.resolve({ success: false }),
@@ -56,7 +178,7 @@ const browserApi = {
 const appApi = isElectron ? window.api : browserApi;
 
 // --- State ---
-let currentUser = null; // { name, role: 'teacher'|'student' }
+let currentUser = null; // { name, role: 'admin'|'teacher'|'student', id, username }
 let topics = [];
 let currentTopicId = null;
 let currentTopicModules = [];
@@ -66,6 +188,65 @@ let editingTopicId = null;
 let contentEditor = null;
 let moduleDescEditorInitialized = false;
 let examModeEnabled = false;
+
+// User Import Elements
+const btnImportUsers = document.getElementById('btnImportUsers');
+const userImportOverlay = document.getElementById('userImportOverlay');
+const userImportForm = document.getElementById('userImportForm');
+const userImportFile = document.getElementById('userImportFile');
+const btnCancelUserImport = document.getElementById('btnCancelUserImport');
+const userImportResult = document.getElementById('userImportResult');
+// === Nutzerimport: Dialog-Logik ===
+if (btnImportUsers) {
+  btnImportUsers.addEventListener('click', async () => {
+    if (isElectron) {
+      // In Electron: native dialog directly
+      const res = await appApi.importUsers();
+      if (res && res.success) {
+        showToast(`${res.created.length} Nutzer importiert.`, 'success');
+        await refreshAdminUsers();
+      } else if (res && res.error) {
+        showToast('Fehler: ' + res.error, 'error');
+      }
+    } else {
+      // In Browser: show overlay
+      userImportOverlay.classList.remove('hidden');
+      userImportResult.textContent = '';
+      userImportFile.value = '';
+    }
+  });
+}
+if (btnCancelUserImport) {
+  btnCancelUserImport.addEventListener('click', () => {
+    userImportOverlay.classList.add('hidden');
+    userImportResult.textContent = '';
+    userImportFile.value = '';
+  });
+}
+if (userImportForm) {
+  userImportForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const file = userImportFile.files[0];
+    if (!file) return;
+    userImportResult.innerHTML = '<span class="hint">Import läuft...</span>';
+    const formData = new FormData();
+    formData.append('file', file);
+    const token = authStore.getToken();
+    const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+    try {
+      const res = await fetch('/api/admin/user-import', { method: 'POST', headers, body: formData });
+      const data = await res.json();
+      if (data.success) {
+        userImportResult.innerHTML = `<span style='color:green'>${data.created.length} Nutzer importiert.</span>` + (data.skipped.length ? `<br><span style='color:orange'>${data.skipped.length} übersprungen.</span>` : '');
+        await refreshAdminUsers();
+      } else {
+        userImportResult.innerHTML = `<span style='color:red'>Fehler: ${data.error || 'Unbekannter Fehler'}</span>`;
+      }
+    } catch (err) {
+      userImportResult.innerHTML = `<span style='color:red'>Fehler: ${err.message}</span>`;
+    }
+  });
+}
 
 // Quiz state
 let quizState = null; // { topicId, modules, currentIndex, answers, startTime }
@@ -408,12 +589,54 @@ function initModuleDescriptionEditor() {
 
 // ==================== LOGIN ====================
 
-loginForm.addEventListener('submit', (e) => {
+async function initLoginScreen() {
+  // In browser mode: check if empty student passwords are allowed
+  if (!isElectron) {
+    try {
+      const settings = await fetch('/api/auth/settings').then(r => r.json());
+      const studentPasswordField = document.getElementById('loginPassword');
+      if (studentPasswordField) {
+        studentPasswordField.required = !settings.allowEmptyStudentPassword;
+        document.getElementById('loginPasswordGroup').classList.toggle('hidden', settings.allowEmptyStudentPassword);
+      }
+    } catch (_) {}
+  }
+}
+
+loginForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = loginName.value.trim();
+  const passwordInput = document.getElementById('loginPassword');
+  const password = passwordInput ? passwordInput.value : '';
   if (!name) return;
-  currentUser = { name, role: 'student' };
-  enterApp();
+
+  if (!isElectron) {
+    // Browser mode: authenticate via API
+    const loginError = document.getElementById('studentLoginError');
+    try {
+      const res = await browserApi.login(name, password);
+      if (res.token && res.role === 'student') {
+        authStore.setToken(res.token);
+        currentUser = { name: res.displayName || res.username, role: 'student', id: res.id, username: res.username };
+        if (loginError) loginError.classList.add('hidden');
+        enterApp();
+      } else if (res.token && (res.role === 'admin' || res.role === 'teacher')) {
+        // Teacher/admin tried the student form
+        authStore.setToken(res.token);
+        currentUser = { name: res.displayName || res.username, role: res.role, id: res.id, username: res.username };
+        if (loginError) loginError.classList.add('hidden');
+        enterApp();
+      } else {
+        if (loginError) { loginError.textContent = res.error || 'Anmeldung fehlgeschlagen'; loginError.classList.remove('hidden'); }
+      }
+    } catch (_) {
+      if (loginError) { loginError.textContent = 'Server nicht erreichbar'; loginError.classList.remove('hidden'); }
+    }
+  } else {
+    // Electron mode: student login is name-only (no password check for legacy compat)
+    currentUser = { name, role: 'student', username: name };
+    enterApp();
+  }
 });
 
 btnShowAdminLogin.addEventListener('click', () => {
@@ -433,54 +656,66 @@ adminLoginForm.addEventListener('submit', async (e) => {
   const user = adminUsername.value.trim();
   const pass = adminPassword.value;
   if (!user || !pass) return;
-  const valid = await appApi.verifyAdmin(user, pass);
-  if (valid) {
-    currentUser = { name: user, role: 'teacher' };
-    adminLoginError.classList.add('hidden');
-    enterApp();
+
+  if (!isElectron) {
+    // Browser mode: login via API, get role from response
+    try {
+      const res = await browserApi.login(user, pass);
+      if (res.token && (res.role === 'admin' || res.role === 'teacher')) {
+        authStore.setToken(res.token);
+        currentUser = { name: res.displayName || res.username, role: res.role, id: res.id, username: res.username };
+        adminLoginError.classList.add('hidden');
+        enterApp();
+      } else {
+        adminLoginError.textContent = res.error || 'Falsche Anmeldedaten';
+        adminLoginError.classList.remove('hidden');
+      }
+    } catch (_) {
+      adminLoginError.textContent = 'Server nicht erreichbar';
+      adminLoginError.classList.remove('hidden');
+    }
   } else {
-    adminLoginError.classList.remove('hidden');
+    // Electron mode: use IPC verify-admin (which now checks hashed password)
+    const valid = await appApi.verifyAdmin(user, pass);
+    if (valid) {
+      // valid is now an object { success, role, username, displayName } from IPC
+      currentUser = { name: valid.displayName || user, role: valid.role || 'teacher', username: user };
+      adminLoginError.classList.add('hidden');
+      enterApp();
+    } else {
+      adminLoginError.classList.remove('hidden');
+    }
   }
 });
 
-btnLogout.addEventListener('click', () => {
+function showLoginScreen() {
   currentUser = null;
   quizState = null;
   currentTopicId = null;
-
-  // Blur any active element to break stale focus chains
-  if (document.activeElement && document.activeElement !== document.body) {
-    document.activeElement.blur();
-  }
-
-  // Reset all active views
-  views.forEach((v) => v.classList.remove('active'));
-
-  // Reset quiz UI state and clear all dynamic content
+  if (!isElectron) authStore.setToken(null);
+  views.forEach(v => v.classList.remove('active'));
   quizPlayerArea.classList.add('hidden');
   quizResultArea.classList.add('hidden');
   quizTopicSelect.classList.remove('hidden');
   quizModuleContainer.innerHTML = '';
   h5pContainer.innerHTML = '';
   quizSubtitle.textContent = t('quiz.subtitle');
-
-  // Hide app, show login via class toggle
   appContainer.classList.add('hidden');
   teacherNav.classList.add('hidden');
   studentNav.classList.add('hidden');
+  const adminNavEl = document.getElementById('adminNav');
+  if (adminNavEl) adminNavEl.classList.add('hidden');
   loginScreen.classList.remove('hidden');
-
-  // Clear form fields
   loginName.value = '';
-  // adminUsername.value = 'admin';  // Leave this as is, the HTML defaultValue sets this via DOM initially, but let's re-enforce it
   adminUsername.value = 'admin';
   adminPassword.value = '';
   adminLoginSection.classList.add('hidden');
   adminLoginError.classList.add('hidden');
   studentLoginSection.classList.remove('hidden');
-
   loginName.focus();
-});
+}
+
+btnLogout.addEventListener('click', showLoginScreen);
 
 async function enterApp() {
   loginScreen.classList.add('hidden');
@@ -488,14 +723,23 @@ async function enterApp() {
 
   await loadExamMode();
 
+  const adminNavEl = document.getElementById('adminNav');
+
   // Show role-specific nav
-  if (currentUser.role === 'teacher') {
+  if (currentUser.role === 'admin') {
     teacherNav.classList.remove('hidden');
     studentNav.classList.add('hidden');
+    if (adminNavEl) adminNavEl.classList.remove('hidden');
+    userInfo.innerHTML = `<span class="user-role-badge admin">Admin</span> ${escapeHtml(currentUser.name)}`;
+  } else if (currentUser.role === 'teacher') {
+    teacherNav.classList.remove('hidden');
+    studentNav.classList.add('hidden');
+    if (adminNavEl) adminNavEl.classList.add('hidden');
     userInfo.innerHTML = `<span class="user-role-badge teacher">${t('role.teacher')}</span> ${escapeHtml(currentUser.name)}`;
   } else {
     teacherNav.classList.add('hidden');
     studentNav.classList.remove('hidden');
+    if (adminNavEl) adminNavEl.classList.add('hidden');
     userInfo.innerHTML = `<span class="user-role-badge student">${t('role.student')}</span> ${escapeHtml(currentUser.name)}`;
   }
 
@@ -504,12 +748,14 @@ async function enterApp() {
   await loadTopics();
 
   // Navigate to default view
-  if (currentUser.role === 'teacher') {
+  if (currentUser.role === 'admin' || currentUser.role === 'teacher') {
     navigateToView('teacher-dashboard');
+    if (currentUser.role === 'admin') loadAdminView();
   } else {
     navigateToView('student-topics');
   }
 }
+
 
 if (chkExamMode) {
   chkExamMode.addEventListener('change', async (e) => {
@@ -524,24 +770,41 @@ if (chkExamMode) {
 // ==================== NAVIGATION ====================
 
 function setupNavigation() {
-  const navContainer = currentUser.role === 'teacher' ? teacherNav : studentNav;
-  const navButtons = navContainer.querySelectorAll('.nav-btn');
-  navButtons.forEach((btn) => {
+  const isTeacherLike = currentUser.role === 'teacher' || currentUser.role === 'admin';
+  const navContainer = isTeacherLike ? teacherNav : studentNav;
+  navContainer.querySelectorAll('.nav-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       navigateToView(btn.dataset.view);
     });
   });
+  // Wire adminNav buttons for admin role
+  if (currentUser.role === 'admin') {
+    const adminNavEl = document.getElementById('adminNav');
+    if (adminNavEl) {
+      adminNavEl.querySelectorAll('.nav-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          navigateToView(btn.dataset.view);
+        });
+      });
+    }
+  }
 }
 
 function navigateToView(viewName) {
   views.forEach((v) => v.classList.remove('active'));
-  const navContainer = currentUser.role === 'teacher' ? teacherNav : studentNav;
+  const isTeacherLike = currentUser.role === 'teacher' || currentUser.role === 'admin';
+  const navContainer = isTeacherLike ? teacherNav : studentNav;
   navContainer.querySelectorAll('.nav-btn').forEach((b) => b.classList.remove('active'));
+  // Also clear adminNav active state
+  const adminNavEl = document.getElementById('adminNav');
+  if (adminNavEl) adminNavEl.querySelectorAll('.nav-btn').forEach((b) => b.classList.remove('active'));
 
   const targetView = document.getElementById(`view-${viewName}`);
   if (targetView) targetView.classList.add('active');
 
-  const targetBtn = navContainer.querySelector(`.nav-btn[data-view="${viewName}"]`);
+  // Set active nav button in the right nav
+  const targetBtn = navContainer.querySelector(`.nav-btn[data-view="${viewName}"]`)
+    || (adminNavEl && adminNavEl.querySelector(`.nav-btn[data-view="${viewName}"]`));
   if (targetBtn) targetBtn.classList.add('active');
 
   // Refresh data for views
@@ -551,7 +814,11 @@ function navigateToView(viewName) {
   if (viewName === 'teacher-results') refreshResults();
   if (viewName === 'student-topics') refreshStudentTopics();
   if (viewName === 'student-quiz') refreshQuizTopicSelect();
+  if (viewName === 'admin-users') refreshAdminUsers();
+  if (viewName === 'admin-classes') refreshAdminClasses();
+  if (viewName === 'admin-settings') refreshAdminSettings();
 }
+
 
 window.appNavigate = navigateToView;
 
@@ -688,6 +955,9 @@ async function refreshTopicsList() {
             <span class="topic-module-count">${moduleCount} Module</span>
             ${isRawTopic ? '<span class="topic-status" style="background:#eef2ff; color:#3730a3;">RAW H5P</span>' : ''}
             <span class="topic-status ${topic.selected ? 'active' : 'inactive'}">${topic.selected ? '✅ Aktiv' : '❌ Inaktiv'}</span>
+            ${topic.ownerId && topic.ownerId !== (currentUser && currentUser.id)
+              ? '<span class="topic-shared-badge">🔗 Geteilt</span>'
+              : (Array.isArray(topic.sharedWith) && topic.sharedWith.length > 0 ? '<span class="topic-shared-badge owner">👥 Freigegeben</span>' : '')}
           </div>
         </div>
         <div class="topic-card-actions">
@@ -697,12 +967,18 @@ async function refreshTopicsList() {
           </label>
           <button class="btn btn-primary btn-sm btn-open-topic" data-topic-id="${topic.id}" title="Module verwalten">📦 Module</button>
           <button class="btn btn-secondary btn-sm btn-edit-topic" data-topic-id="${topic.id}" title="Bearbeiten">✏️</button>
+          <button class="btn btn-secondary btn-sm btn-share-topic" data-topic-id="${topic.id}" title="Mit Lehrern teilen">👥</button>
           <button class="btn btn-secondary btn-sm btn-export-topic" data-topic-id="${topic.id}" title="Als JSON exportieren">📤</button>
           <button class="btn btn-secondary btn-sm btn-export-h5p-topic" data-topic-id="${topic.id}" title="Als H5P exportieren">📦 H5P</button>
           <button class="btn btn-danger btn-sm btn-delete-topic" data-topic-id="${topic.id}" title="Löschen">🗑</button>
         </div>
       </div>
     `;
+
+    // Share topic
+    card.querySelector('.btn-share-topic').addEventListener('click', () => {
+      openShareDialog(topic);
+    });
 
     // Toggle activation
     card.querySelector('.topic-toggle').addEventListener('change', async (e) => {
@@ -3367,6 +3643,321 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+// ==================== TOPIC SHARING ====================
+
+async function openShareDialog(topic) {
+  // Can only share if owner or admin
+  const isOwner = topic.ownerId === (currentUser && currentUser.id);
+  if (!isOwner && currentUser.role !== 'admin') {
+    showToast('Nur der Eigentümer oder ein Admin kann dieses Thema teilen.', 'error');
+    return;
+  }
+
+  // Load available teachers/admins to share with
+  let users = [];
+  try {
+    const allUsers = await appApi.getAllUsers();
+    // Show teachers and admins (not the owner themselves, not students)
+    users = allUsers.filter(u =>
+      (u.role === 'teacher' || u.role === 'admin') &&
+      u.id !== (currentUser && currentUser.id)
+    );
+  } catch (_) {}
+
+  const currentShared = Array.isArray(topic.sharedWith) ? topic.sharedWith : [];
+  const overlay = document.createElement('div');
+  overlay.className = 'confirm-overlay';
+  overlay.innerHTML = `
+    <div class="import-modules-card" style="min-width:360px;max-width:480px">
+      <h3>👥 Thema teilen: <em>${escapeHtml(topic.title)}</em></h3>
+      <p style="color:var(--text-secondary);font-size:0.9em;margin-bottom:12px">
+        Wähle Lehrer/Admins, die dieses Thema bearbeiten dürfen:
+      </p>
+      <div id="shareUserList" style="display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto;margin-bottom:16px">
+        ${users.length === 0
+          ? '<p style="color:var(--text-secondary)">Keine anderen Lehrer/Admins vorhanden.</p>'
+          : users.map(u => `
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px;border-radius:var(--radius-sm);background:var(--bg-secondary)">
+              <input type="checkbox" value="${escapeHtml(u.id)}" ${currentShared.includes(u.id) ? 'checked' : ''} />
+              <span class="user-role-badge ${u.role}">${u.role === 'admin' ? 'Admin' : 'Lehrer'}</span>
+              <span>${escapeHtml(u.displayName || u.username)}</span>
+            </label>
+          `).join('')}
+      </div>
+      <div class="confirm-actions">
+        <button class="btn btn-primary" id="btnShareSave">Freigabe speichern</button>
+        <button class="btn btn-secondary" id="btnShareCancel">Abbrechen</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector('#btnShareCancel').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#btnShareSave').addEventListener('click', async () => {
+    const checked = Array.from(overlay.querySelectorAll('#shareUserList input:checked')).map(cb => cb.value);
+    try {
+      // For Electron mode: use saveTopicSharing IPC; for browser: PATCH API
+      if (appApi.setTopicSharing) {
+        await appApi.setTopicSharing(topic.id, checked);
+      } else if (appApi.saveTopic) {
+        // Electron fallback: load full topic, update sharedWith, save
+        const fullTopic = topics.find(tt => tt.id === topic.id);
+        if (fullTopic) {
+          fullTopic.sharedWith = checked;
+          await appApi.saveTopic(fullTopic);
+        }
+      }
+      overlay.remove();
+      showToast('Freigabe gespeichert', 'success');
+      await loadTopics();
+      refreshTopicsList();
+    } catch (e) {
+      showToast('Fehler beim Speichern: ' + e.message, 'error');
+    }
+  });
+  // Close on backdrop click
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+}
+
+// ==================== ADMIN VIEWS ====================
+
+
+let _adminUsersCache = [];
+let _adminClassesCache = [];
+let _adminUserFilter = 'all';
+
+async function loadAdminView() {
+  // Setup nav button handlers for admin views
+  document.querySelectorAll('#adminNav .nav-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const view = btn.getAttribute('data-view');
+      document.querySelectorAll('#adminNav .nav-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      navigateToView(view);
+      if (view === 'admin-users') refreshAdminUsers();
+      if (view === 'admin-classes') refreshAdminClasses();
+      if (view === 'admin-settings') refreshAdminSettings();
+    });
+  });
+
+  // Admin tab filters
+  document.querySelectorAll('.admin-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      _adminUserFilter = btn.getAttribute('data-filter');
+      renderUsersList();
+    });
+  });
+
+  // New User button
+  const btnNewUser = document.getElementById('btnNewUser');
+  if (btnNewUser) btnNewUser.addEventListener('click', () => openUserForm(null));
+
+  // User form
+  const userForm = document.getElementById('userForm');
+  const userFormOverlay = document.getElementById('userFormOverlay');
+  const btnCancelUser = document.getElementById('btnCancelUser');
+  if (btnCancelUser) btnCancelUser.addEventListener('click', () => userFormOverlay.classList.add('hidden'));
+  if (userForm) userForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = document.getElementById('userFormId').value;
+    const username = document.getElementById('userFormUsername').value.trim();
+    const displayName = document.getElementById('userFormDisplayName').value.trim();
+    const role = document.getElementById('userFormRole').value;
+    const password = document.getElementById('userFormPassword').value;
+    const classCheckboxes = document.querySelectorAll('#userFormClassesList input[type=checkbox]:checked');
+    const classIds = Array.from(classCheckboxes).map(cb => cb.value);
+    const userData = { username, displayName, role, classIds };
+    if (id) userData.id = id;
+    if (password) userData.password = password;
+    const api = appApi;
+    const res = await api.saveUser(userData);
+    if (res && res.success !== false) {
+      userFormOverlay.classList.add('hidden');
+      await refreshAdminUsers();
+      showToast('Benutzer gespeichert', 'success');
+    } else {
+      showToast('Fehler: ' + (res && res.error || 'Unbekannter Fehler'), 'error');
+    }
+  });
+
+  // New Class button
+  const btnNewClass = document.getElementById('btnNewClass');
+  if (btnNewClass) btnNewClass.addEventListener('click', () => openClassForm(null));
+
+  // Class form
+  const classForm = document.getElementById('classForm');
+  const classFormOverlay = document.getElementById('classFormOverlay');
+  const btnCancelClass = document.getElementById('btnCancelClass');
+  if (btnCancelClass) btnCancelClass.addEventListener('click', () => classFormOverlay.classList.add('hidden'));
+  if (classForm) classForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = document.getElementById('classFormId').value;
+    const name = document.getElementById('classFormName').value.trim();
+    const classData = { name };
+    if (id) classData.id = id;
+    const res = await appApi.saveClass(classData);
+    if (res && res.success !== false) {
+      classFormOverlay.classList.add('hidden');
+      await refreshAdminClasses();
+      showToast('Klasse gespeichert', 'success');
+    } else {
+      showToast('Fehler: ' + (res && res.error || 'Unbekannter Fehler'), 'error');
+    }
+  });
+
+  // Settings
+  const btnSaveSettings = document.getElementById('btnSaveSettings');
+  if (btnSaveSettings) btnSaveSettings.addEventListener('click', async () => {
+    const setting = document.getElementById('settingAllowEmptyStudentPwd').checked;
+    const res = await appApi.saveAppSettings({ allowEmptyStudentPassword: setting });
+    if (res && res.success !== false) showToast('Einstellungen gespeichert', 'success');
+    else showToast('Fehler beim Speichern', 'error');
+  });
+}
+
+async function refreshAdminUsers() {
+  try {
+    _adminUsersCache = await appApi.getAllUsers();
+    _adminClassesCache = await appApi.getAllClasses();
+    renderUsersList();
+  } catch (e) {
+    document.getElementById('usersList').innerHTML = `<p class="hint">Fehler: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+function renderUsersList() {
+  const container = document.getElementById('usersList');
+  if (!container) return;
+  const filter = _adminUserFilter;
+  const users = filter === 'all' ? _adminUsersCache : _adminUsersCache.filter(u => u.role === filter);
+  const roleLabels = { admin: 'Admin', teacher: 'Lehrer', student: 'Schüler' };
+  const roleBadge = (role) => `<span class="user-role-badge ${role}">${roleLabels[role] || role}</span>`;
+  const getClassNames = (classIds) => (classIds || []).map(cid => { const cls = _adminClassesCache.find(c => c.id === cid); return cls ? cls.name : cid; }).join(', ');
+
+  if (!users.length) { container.innerHTML = '<p class="hint">Keine Benutzer gefunden.</p>'; return; }
+  container.innerHTML = users.map(u => `
+    <div class="admin-list-item" data-id="${escapeHtml(u.id)}">
+      <div class="admin-list-item-info">
+        <strong>${escapeHtml(u.displayName || u.username)}</strong>
+        <span style="color:var(--text-secondary);font-size:0.9em">@${escapeHtml(u.username)}</span>
+        ${roleBadge(u.role)}
+        ${u.classIds && u.classIds.length ? `<span class="hint">Klassen: ${escapeHtml(getClassNames(u.classIds))}</span>` : ''}
+      </div>
+      <div class="admin-list-item-actions">
+        <button class="btn btn-secondary btn-sm" onclick="openUserForm('${escapeHtml(u.id)}')">✏️ Bearbeiten</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteUser('${escapeHtml(u.id)}')">🗑</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function openUserForm(userId) {
+  const overlay = document.getElementById('userFormOverlay');
+  const title = document.getElementById('userFormTitle');
+  const idInput = document.getElementById('userFormId');
+  const usernameInput = document.getElementById('userFormUsername');
+  const displayNameInput = document.getElementById('userFormDisplayName');
+  const roleSelect = document.getElementById('userFormRole');
+  const passwordInput = document.getElementById('userFormPassword');
+  const classesList = document.getElementById('userFormClassesList');
+
+  const user = userId ? _adminUsersCache.find(u => u.id === userId) : null;
+  title.textContent = user ? 'Benutzer bearbeiten' : 'Neuer Benutzer';
+  idInput.value = user ? user.id : '';
+  usernameInput.value = user ? user.username : '';
+  displayNameInput.value = user ? (user.displayName || '') : '';
+  roleSelect.value = user ? user.role : 'student';
+  passwordInput.value = '';
+
+  // Render class checkboxes
+  classesList.innerHTML = _adminClassesCache.map(cls => `
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+      <input type="checkbox" value="${escapeHtml(cls.id)}" ${user && user.classIds && user.classIds.includes(cls.id) ? 'checked' : ''} />
+      ${escapeHtml(cls.name)}
+    </label>
+  `).join('') || '<span style="color:var(--text-secondary)">Noch keine Klassen angelegt</span>';
+
+  overlay.classList.remove('hidden');
+  usernameInput.focus();
+}
+
+window.openUserForm = openUserForm;
+
+async function deleteUser(userId) {
+  const user = _adminUsersCache.find(u => u.id === userId);
+  if (!user) return;
+  const confirmed = await appConfirm(`Benutzer "${user.displayName || user.username}" wirklich löschen?`);
+  if (!confirmed) return;
+  const res = await appApi.deleteUser(userId);
+  if (res && res.success !== false) { await refreshAdminUsers(); showToast('Benutzer gelöscht', 'success'); }
+  else showToast('Fehler: ' + (res && res.error || '?'), 'error');
+}
+window.deleteUser = deleteUser;
+
+async function refreshAdminClasses() {
+  try {
+    _adminClassesCache = await appApi.getAllClasses();
+    _adminUsersCache = await appApi.getAllUsers();
+    renderClassesList();
+  } catch (e) {
+    document.getElementById('classesList').innerHTML = `<p class="hint">Fehler: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+function renderClassesList() {
+  const container = document.getElementById('classesList');
+  if (!container) return;
+  const getStudentCount = (classId) => _adminUsersCache.filter(u => u.role === 'student' && u.classIds && u.classIds.includes(classId)).length;
+  if (!_adminClassesCache.length) { container.innerHTML = '<p class="hint">Noch keine Klassen angelegt.</p>'; return; }
+  container.innerHTML = _adminClassesCache.map(cls => `
+    <div class="admin-list-item" data-id="${escapeHtml(cls.id)}">
+      <div class="admin-list-item-info">
+        <strong>${escapeHtml(cls.name)}</strong>
+        <span style="color:var(--text-secondary);font-size:0.9em">${getStudentCount(cls.id)} Schüler</span>
+      </div>
+      <div class="admin-list-item-actions">
+        <button class="btn btn-secondary btn-sm" onclick="openClassForm('${escapeHtml(cls.id)}')">✏️ Bearbeiten</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteClass('${escapeHtml(cls.id)}')">🗑</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function openClassForm(classId) {
+  const overlay = document.getElementById('classFormOverlay');
+  const title = document.getElementById('classFormTitle');
+  const idInput = document.getElementById('classFormId');
+  const nameInput = document.getElementById('classFormName');
+  const cls = classId ? _adminClassesCache.find(c => c.id === classId) : null;
+  title.textContent = cls ? 'Klasse bearbeiten' : 'Neue Klasse';
+  idInput.value = cls ? cls.id : '';
+  nameInput.value = cls ? cls.name : '';
+  overlay.classList.remove('hidden');
+  nameInput.focus();
+}
+window.openClassForm = openClassForm;
+
+async function deleteClass(classId) {
+  const cls = _adminClassesCache.find(c => c.id === classId);
+  if (!cls) return;
+  const confirmed = await appConfirm(`Klasse "${cls.name}" wirklich löschen?`);
+  if (!confirmed) return;
+  const res = await appApi.deleteClass(classId);
+  if (res && res.success !== false) { await refreshAdminClasses(); showToast('Klasse gelöscht', 'success'); }
+  else showToast('Fehler: ' + (res && res.error || '?'), 'error');
+}
+window.deleteClass = deleteClass;
+
+async function refreshAdminSettings() {
+  try {
+    const settings = await appApi.getAppSettings();
+    const chk = document.getElementById('settingAllowEmptyStudentPwd');
+    if (chk) chk.checked = !!settings.allowEmptyStudentPassword;
+  } catch (_) {}
+}
+
 // ==================== INITIALIZATION ====================
 
 const btnThemeToggle = document.getElementById('btnThemeToggle');
@@ -3430,15 +4021,16 @@ async function init() {
     }
   }
 
-  // In browser mode: hide admin login, force student-only
+  // In browser mode: show admin login (now supported via REST API)
   if (!isElectron) {
+    // Restore admin login button visibility (was hidden in v1)
     const adminToggle = document.getElementById('btnShowAdminLogin');
-    if (adminToggle) adminToggle.style.display = 'none';
-    const adminSection = document.getElementById('adminLoginSection');
-    if (adminSection) adminSection.style.display = 'none';
-    // Hide the network QR (not relevant in browser)
+    if (adminToggle) adminToggle.style.display = '';
+    // Hide network QR (only relevant for Electron host)
     const netQr = document.getElementById('networkQr');
     if (netQr) netQr.style.display = 'none';
+    // Init login screen (password field visibility)
+    await initLoginScreen();
   }
 }
 

@@ -1,11 +1,18 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const zlib = require('zlib');
+const crypto = require('crypto');
+
+const IS_SERVER_MODE = process.argv.includes('--server') || process.env.SERVER_MODE === 'true';
+const PORT = process.env.PORT || 3000;
+
+const { app, BrowserWindow, ipcMain, dialog, Menu } = IS_SERVER_MODE
+  ? { app: null, BrowserWindow: null, ipcMain: { handle: () => {}, on: () => {} }, dialog: null, Menu: null }
+  : require('electron');
 
 // Linux: disable GPU/hardware acceleration to prevent SIGSEGV crashes
-if (process.platform === 'linux') {
+if (process.platform === 'linux' && !IS_SERVER_MODE) {
   app.disableHardwareAcceleration();
   app.commandLine.appendSwitch('no-sandbox');
   app.commandLine.appendSwitch('disable-gpu');
@@ -14,40 +21,162 @@ if (process.platform === 'linux') {
 const express = require('express');
 const QRCode = require('qrcode');
 
-const DATA_DIR = path.join(app.getPath('userData'), 'learning-modules');
+const DATA_DIR = IS_SERVER_MODE
+  ? path.join(process.cwd(), 'data')
+  : path.join(app.getPath('userData'), 'learning-modules');
 const DB_FILE = path.join(DATA_DIR, 'database.json');
+const { parseUserImportFile } = require('./user-import');
 
-// --- Default database structure ---
-const DEFAULT_DB = {
-  admin: { username: 'admin', password: 'lehrer1' },
-  topics: [],
-  examMode: false,
-  results: [],
-  studentSelectedTopics: {},
-  nextResultId: 1,
-};
+// ============================================================
+// === AUTH UTILITIES (crypto, tokens) — no external deps ===
+// ============================================================
+
+// Derive a stable secret from DATA_DIR so tokens are session-persistent but not guessable
+function getTokenSecret() {
+  const secretFile = path.join(DATA_DIR, '.token_secret');
+  if (fs.existsSync(secretFile)) return fs.readFileSync(secretFile, 'utf-8').trim();
+  const secret = crypto.randomBytes(48).toString('hex');
+  ensureDataDir();
+  fs.writeFileSync(secretFile, secret, 'utf-8');
+  return secret;
+}
+let _tokenSecret = null;
+function tokenSecret() { if (!_tokenSecret) _tokenSecret = getTokenSecret(); return _tokenSecret; }
+
+function hashPassword(password) {
+  if (!password) return ''; // empty password stored as empty string
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 32).toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, stored) {
+  if (!stored) return !password; // empty stored hash: match only if empty password provided
+  const [salt, hash] = stored.split(':');
+  if (!salt || !hash) return false;
+  const attempt = crypto.scryptSync(password || '', salt, 32).toString('hex');
+  return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(attempt, 'hex'));
+}
+
+function signToken(payload) {
+  const data = JSON.stringify(payload);
+  const b64 = Buffer.from(data).toString('base64url');
+  const sig = crypto.createHmac('sha256', tokenSecret()).update(b64).digest('base64url');
+  return `${b64}.${sig}`;
+}
+
+function verifyToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  const [b64, sig] = token.split('.');
+  if (!b64 || !sig) return null;
+  const expected = crypto.createHmac('sha256', tokenSecret()).update(b64).digest('base64url');
+  try {
+    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  } catch { return null; }
+  try {
+    const payload = JSON.parse(Buffer.from(b64, 'base64url').toString());
+    if (payload.exp && Date.now() > payload.exp) return null;
+    return payload;
+  } catch { return null; }
+}
+
+function makeToken(user) {
+  return signToken({
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    exp: Date.now() + 24 * 60 * 60 * 1000, // 24h
+  });
+}
+
+function requireAuth(roles) {
+  return (req, res, next) => {
+    const authHeader = req.headers['authorization'] || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    const payload = verifyToken(token);
+    if (!payload) return res.status(401).json({ error: 'Nicht authentifiziert' });
+    if (roles && !roles.includes(payload.role)) return res.status(403).json({ error: 'Keine Berechtigung' });
+    req.authUser = payload;
+    next();
+  };
+}
+
+// ============================================================
+// === DATABASE ===============================================
+// ============================================================
+
+function makeUserId() { return 'usr_' + Date.now().toString(36) + '_' + crypto.randomBytes(4).toString('hex'); }
+function makeClassId() { return 'cls_' + Date.now().toString(36) + '_' + crypto.randomBytes(4).toString('hex'); }
 
 function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, JSON.stringify(DEFAULT_DB, null, 2), 'utf-8');
-  }
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
 function loadDB() {
   ensureDataDir();
-  const raw = fs.readFileSync(DB_FILE, 'utf-8');
-  const db = JSON.parse(raw);
-  // Ensure all keys exist (migration from old format)
-  if (!db.admin) db.admin = DEFAULT_DB.admin;
-  if (!db.topics) db.topics = [];
-  if (typeof db.examMode !== 'boolean') db.examMode = false;
-  if (!db.results) db.results = [];
-  if (!db.studentSelectedTopics) db.studentSelectedTopics = {};
-  if (!db.nextResultId) db.nextResultId = 1;
-  // Migrate old modules.json format: convert flat modules list into a single topic
+  if (!fs.existsSync(DB_FILE)) {
+    const initial = buildInitialDB();
+    fs.writeFileSync(DB_FILE, JSON.stringify(initial, null, 2), 'utf-8');
+    return initial;
+  }
+  let db;
+  try { db = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8')); }
+  catch { db = {}; }
+  return migrateDB(db);
+}
+
+function buildInitialDB() {
+  const adminId = makeUserId();
+  return {
+    users: [{
+      id: adminId,
+      username: 'admin',
+      passwordHash: hashPassword('lehrer1'),
+      role: 'admin',
+      displayName: 'Administrator',
+      accessFilters: { ips: [], browserUsers: [], browserDomains: [] },
+    }],
+    settings: { allowEmptyStudentPassword: true },
+    classes: [],
+    topics: [],
+    examMode: false,
+    results: [],
+    studentSelectedTopics: {},
+    nextResultId: 1,
+  };
+}
+
+function migrateDB(db) {
+  let changed = false;
+
+  // v1→v2: migrate old single-admin format to users array
+  if (!db.users && db.admin) {
+    const adminId = makeUserId();
+    const pw = db.admin.password || 'lehrer1';
+    db.users = [{
+      id: adminId,
+      username: db.admin.username || 'admin',
+      passwordHash: hashPassword(pw),
+      role: 'admin',
+      displayName: 'Administrator',
+      accessFilters: { ips: [], browserUsers: [], browserDomains: [] },
+    }];
+    delete db.admin;
+    changed = true;
+  }
+  if (!db.users) { db.users = []; changed = true; }
+  if (!db.settings) { db.settings = { allowEmptyStudentPassword: true }; changed = true; }
+  if (typeof db.settings.allowEmptyStudentPassword !== 'boolean') {
+    db.settings.allowEmptyStudentPassword = true; changed = true;
+  }
+  if (!db.classes) { db.classes = []; changed = true; }
+  if (!db.topics) { db.topics = []; changed = true; }
+  if (typeof db.examMode !== 'boolean') { db.examMode = false; changed = true; }
+  if (!db.results) { db.results = []; changed = true; }
+  if (!db.studentSelectedTopics) { db.studentSelectedTopics = {}; changed = true; }
+  if (!db.nextResultId) { db.nextResultId = 1; changed = true; }
+
+  // Migrate old flat modules list to first topic
   if (db.modules && Array.isArray(db.modules) && db.modules.length > 0) {
     db.topics.push({
       id: 'topic_migrated',
@@ -58,14 +187,49 @@ function loadDB() {
       modules: db.modules,
     });
     delete db.modules;
-    saveDB(db);
+    changed = true;
   }
+
+  // Ensure topics have ownerId/permissions
+  const firstAdmin = db.users.find(u => u.role === 'admin');
+  for (const t of db.topics) {
+    if (!t.ownerId && firstAdmin) { t.ownerId = firstAdmin.id; changed = true; }
+    if (!t.permissions) { t.permissions = { visibleTo: 'all' }; changed = true; }
+  }
+
+  if (changed) saveDB(db);
   return db;
 }
 
 function saveDB(db) {
   ensureDataDir();
   fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
+}
+
+// Helper: get user by username
+function findUser(db, username) {
+  return db.users.find(u => u.username === username) || null;
+}
+
+// Helper: check if a student can see a topic
+function studentCanSeeTopic(topic, user, db) {
+  if (!topic.permissions) return true;
+  const v = topic.permissions.visibleTo;
+  if (!v || v === 'all') return true;
+  if (v === 'none') return false;
+  if (v === 'classes' && Array.isArray(topic.permissions.classIds)) {
+    return (user.classIds || []).some(cid => topic.permissions.classIds.includes(cid));
+  }
+  return true;
+}
+
+// Helper: topics visible to a teacher (own or explicitly shared via sharedWith array)
+function topicsForTeacher(db, userId) {
+  return db.topics.filter(t =>
+    t.ownerId === userId ||
+    (Array.isArray(t.sharedWith) && t.sharedWith.includes(userId)) ||
+    t.permissions?.teacherShared === true // legacy flag
+  );
 }
 
 // === ZIP utility functions for H5P import/export ===
@@ -1037,7 +1201,7 @@ function convertH5pToNative(machineName, params, h5pImages = {}) {
 }
 
 let mainWindow;
-const WEB_PORT = 3000;
+const WEB_PORT = PORT;
 let webServerUrl = null;
 
 // --- Network helpers ---
@@ -1085,37 +1249,280 @@ function getPreferredIP() {
   return null;
 }
 
-// --- Embedded Web Server for WLAN access ---
+// --- Embedded Web Server for WLAN/browser access ---
 function startWebServer() {
   const web = express();
   const rendererDir = path.join(__dirname, '../renderer');
   const assetsDir = path.join(__dirname, '../../assets');
 
-  // REST API for read-only student access
-  web.get('/api/selected-topics', (_req, res) => {
+  // ---- AUTH API ----
+
+  web.post('/api/auth/login', express.json({ limit: '1mb' }), (req, res) => {
+    const { username, password } = req.body || {};
+    if (!username) return res.status(400).json({ error: 'Benutzername fehlt' });
     const db = loadDB();
-    const selected = (db.topics || []).filter((t) => t.selected !== false);
-    // Return topics with only selected modules
-    const cleaned = selected.map((topic) => ({
+    const user = findUser(db, username);
+    if (!user) return res.status(401).json({ error: 'Unbekannter Benutzer' });
+
+    // Student with empty password + setting allowEmptyStudentPassword
+    if (user.role === 'student' && !user.passwordHash && db.settings.allowEmptyStudentPassword) {
+      const token = makeToken(user);
+      return res.json({ token, role: user.role, username: user.username, displayName: user.displayName, id: user.id });
+    }
+
+    if (!verifyPassword(password, user.passwordHash)) {
+      return res.status(401).json({ error: 'Falsches Passwort' });
+    }
+
+    // Check IP access filters for teacher/admin
+    if (user.role !== 'student' && user.accessFilters) {
+      const af = user.accessFilters;
+      const clientIp = req.ip || req.connection?.remoteAddress || '';
+      if (af.ips && af.ips.length > 0 && !af.ips.some(ip => clientIp.includes(ip))) {
+        return res.status(403).json({ error: 'IP nicht zugelassen', filterFailed: 'ip' });
+      }
+    }
+
+    const token = makeToken(user);
+    res.json({ token, role: user.role, username: user.username, displayName: user.displayName, id: user.id });
+  });
+
+  web.get('/api/auth/me', requireAuth(null), (req, res) => {
+    res.json(req.authUser);
+  });
+
+  // Public: client needs to know if empty student passwords are allowed before login
+  web.get('/api/auth/settings', (_req, res) => {
+    const db = loadDB();
+    res.json({ allowEmptyStudentPassword: !!db.settings.allowEmptyStudentPassword });
+  });
+
+  // ---- ADMIN: SETTINGS ----
+
+  web.get('/api/admin/settings', requireAuth(['admin']), (_req, res) => {
+    const db = loadDB();
+    res.json(db.settings);
+  });
+
+  web.post('/api/admin/settings', requireAuth(['admin']), express.json({ limit: '1mb' }), (req, res) => {
+    const db = loadDB();
+    Object.assign(db.settings, req.body);
+    saveDB(db);
+    res.json({ success: true, settings: db.settings });
+  });
+
+  // ---- ADMIN: USER MANAGEMENT ----
+
+  web.get('/api/admin/users', requireAuth(['admin', 'teacher']), (req, res) => {
+    const db = loadDB();
+    const users = req.authUser.role === 'admin'
+      ? db.users
+      : db.users.filter(u => u.role === 'student');
+    res.json(users.map(u => ({ id: u.id, username: u.username, displayName: u.displayName, role: u.role, classIds: u.classIds, accessFilters: u.accessFilters })));
+  });
+
+  // === USER IMPORT (Excel/CSV) ===
+  const multer = require('multer');
+  const upload = multer({ dest: os.tmpdir() });
+
+  /**
+   * POST /api/admin/user-import
+   * Admin/Lehrer können eine Excel- oder CSV-Datei hochladen, um Nutzer zu importieren.
+   * Erwartete Spalten: login, password, class, role, firstname, lastname, email
+   */
+  web.post('/api/admin/user-import', requireAuth(['admin', 'teacher']), upload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'Keine Datei hochgeladen' });
+    let users;
+    try {
+      users = parseUserImportFile(req.file.path);
+    } catch (e) {
+      return res.status(400).json({ error: 'Datei konnte nicht gelesen werden: ' + e.message });
+    }
+    const db = loadDB();
+    const created = [];
+    const skipped = [];
+    for (const row of users) {
+      const username = (row.login || '').trim();
+      const password = (row.password || '').trim();
+      const role = (row.role || '').trim().toLowerCase();
+      let className = (row.class || '').trim();
+      let classId = null;
+      if (!username || !role || (req.authUser.role === 'teacher' && role !== 'student')) {
+        skipped.push({ username, reason: 'Pflichtfelder fehlen oder Rolle nicht erlaubt' });
+        continue;
+      }
+      if (findUser(db, username)) {
+        skipped.push({ username, reason: 'Benutzername bereits vergeben' });
+        continue;
+      }
+      // Klasse ggf. anlegen
+      if (className) {
+        if (!db.classes) db.classes = [];
+        let cls = db.classes.find(c => c.name === className);
+        if (!cls) {
+          cls = { id: makeClassId(), name: className, createdBy: req.authUser.id, createdAt: new Date().toISOString() };
+          db.classes.push(cls);
+        }
+        classId = cls.id;
+      }
+      const newUser = {
+        id: makeUserId(),
+        username,
+        passwordHash: hashPassword(password),
+        role,
+        displayName: (row.firstname || '') + (row.lastname ? ' ' + row.lastname : '') || username,
+        classIds: classId ? [classId] : [],
+        accessFilters: { ips: [], browserUsers: [], browserDomains: [] },
+        email: row.email || '',
+      };
+      db.users.push(newUser);
+      created.push(username);
+    }
+    saveDB(db);
+    // Datei löschen
+    fs.unlink(req.file.path, () => {});
+    res.json({ success: true, created, skipped, total: users.length });
+  });
+
+  web.post('/api/admin/users', requireAuth(['admin', 'teacher']), express.json({ limit: '1mb' }), (req, res) => {
+    const db = loadDB();
+    const { username, password, role, displayName, classIds, accessFilters } = req.body;
+    if (!username || !role) return res.status(400).json({ error: 'username und role sind Pflichtfelder' });
+    if (req.authUser.role === 'teacher' && role !== 'student') {
+      return res.status(403).json({ error: 'Lehrer dürfen nur Schüler erstellen' });
+    }
+    if (findUser(db, username)) return res.status(409).json({ error: 'Benutzername bereits vergeben' });
+    const newUser = {
+      id: makeUserId(),
+      username,
+      passwordHash: hashPassword(password || ''),
+      role,
+      displayName: displayName || username,
+      classIds: classIds || [],
+      accessFilters: accessFilters || { ips: [], browserUsers: [], browserDomains: [] },
+    };
+    db.users.push(newUser);
+    saveDB(db);
+    const { passwordHash: _, ...safe } = newUser;
+    res.json({ success: true, user: safe });
+  });
+
+  web.put('/api/admin/users/:id', requireAuth(['admin', 'teacher']), express.json({ limit: '1mb' }), (req, res) => {
+    const db = loadDB();
+    const idx = db.users.findIndex(u => u.id === req.params.id);
+    if (idx < 0) return res.status(404).json({ error: 'Benutzer nicht gefunden' });
+    const target = db.users[idx];
+    if (req.authUser.role === 'teacher' && target.role !== 'student') {
+      return res.status(403).json({ error: 'Keine Berechtigung' });
+    }
+    const { password, displayName, classIds, accessFilters, role } = req.body;
+    if (displayName !== undefined) target.displayName = displayName;
+    if (classIds !== undefined) target.classIds = classIds;
+    if (accessFilters !== undefined && req.authUser.role === 'admin') target.accessFilters = accessFilters;
+    if (role !== undefined && req.authUser.role === 'admin') target.role = role;
+    if (password !== undefined) target.passwordHash = hashPassword(password);
+    saveDB(db);
+    const { passwordHash: _, ...safe } = target;
+    res.json({ success: true, user: safe });
+  });
+
+  web.delete('/api/admin/users/:id', requireAuth(['admin', 'teacher']), (req, res) => {
+    const db = loadDB();
+    const idx = db.users.findIndex(u => u.id === req.params.id);
+    if (idx < 0) return res.status(404).json({ error: 'Benutzer nicht gefunden' });
+    const target = db.users[idx];
+    if (req.authUser.role === 'teacher' && target.role !== 'student') {
+      return res.status(403).json({ error: 'Keine Berechtigung' });
+    }
+    if (target.id === req.authUser.id) return res.status(400).json({ error: 'Eigenes Konto kann nicht gelöscht werden' });
+    db.users.splice(idx, 1);
+    saveDB(db);
+    res.json({ success: true });
+  });
+
+  // ---- ADMIN: CLASS MANAGEMENT ----
+
+  web.get('/api/admin/classes', requireAuth(['admin', 'teacher']), (_req, res) => {
+    const db = loadDB();
+    res.json(db.classes || []);
+  });
+
+  web.post('/api/admin/classes', requireAuth(['admin', 'teacher']), express.json({ limit: '1mb' }), (req, res) => {
+    const db = loadDB();
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ error: 'Name ist Pflichtfeld' });
+    const newClass = { id: makeClassId(), name, createdBy: req.authUser.id, createdAt: new Date().toISOString() };
+    if (!db.classes) db.classes = [];
+    db.classes.push(newClass);
+    saveDB(db);
+    res.json({ success: true, class: newClass });
+  });
+
+  web.put('/api/admin/classes/:id', requireAuth(['admin', 'teacher']), express.json({ limit: '1mb' }), (req, res) => {
+    const db = loadDB();
+    const cls = (db.classes || []).find(c => c.id === req.params.id);
+    if (!cls) return res.status(404).json({ error: 'Klasse nicht gefunden' });
+    if (req.body.name !== undefined) cls.name = req.body.name;
+    saveDB(db);
+    res.json({ success: true, class: cls });
+  });
+
+  web.delete('/api/admin/classes/:id', requireAuth(['admin', 'teacher']), (req, res) => {
+    const db = loadDB();
+    if (!db.classes) return res.status(404).json({ error: 'Klasse nicht gefunden' });
+    const idx = db.classes.findIndex(c => c.id === req.params.id);
+    if (idx < 0) return res.status(404).json({ error: 'Klasse nicht gefunden' });
+    db.classes.splice(idx, 1);
+    for (const u of db.users) {
+      if (Array.isArray(u.classIds)) u.classIds = u.classIds.filter(cid => cid !== req.params.id);
+    }
+    saveDB(db);
+    res.json({ success: true });
+  });
+
+  // ---- TOPIC PERMISSIONS ----
+
+  web.post('/api/admin/topic-permissions', requireAuth(['admin', 'teacher']), express.json({ limit: '1mb' }), (req, res) => {
+    const db = loadDB();
+    const { topicId, visibleTo, classIds, teacherShared } = req.body;
+    const topic = db.topics.find(t => t.id === topicId);
+    if (!topic) return res.status(404).json({ error: 'Thema nicht gefunden' });
+    if (req.authUser.role !== 'admin' && topic.ownerId !== req.authUser.id) {
+      return res.status(403).json({ error: 'Nur Owner oder Admin dürfen Berechtigungen ändern' });
+    }
+    if (!topic.permissions) topic.permissions = {};
+    if (visibleTo !== undefined) topic.permissions.visibleTo = visibleTo;
+    if (classIds !== undefined) topic.permissions.classIds = classIds;
+    if (teacherShared !== undefined) topic.permissions.teacherShared = !!teacherShared;
+    saveDB(db);
+    res.json({ success: true, permissions: topic.permissions });
+  });
+
+  // ---- SECURED STUDENT API ----
+
+  web.get('/api/selected-topics', requireAuth(null), (req, res) => {
+    const db = loadDB();
+    const user = db.users.find(u => u.id === req.authUser.id) || {};
+    const selected = (db.topics || []).filter(t => t.selected !== false && studentCanSeeTopic(t, user, db));
+    res.json(selected.map(topic => ({
       ...topic,
-      modules: (topic.modules || []).filter((m) => m.moduleSelected !== false),
-    }));
-    res.json(cleaned);
+      modules: (topic.modules || []).filter(m => m.moduleSelected !== false),
+    })));
   });
 
-  web.get('/api/topics/:topicId/modules', (req, res) => {
+  web.get('/api/topics/:topicId/modules', requireAuth(null), (req, res) => {
     const db = loadDB();
-    const topic = (db.topics || []).find((t) => t.id === req.params.topicId);
+    const topic = (db.topics || []).find(t => t.id === req.params.topicId);
     if (!topic) return res.json([]);
-    res.json((topic.modules || []).filter((m) => m.moduleSelected !== false));
+    res.json((topic.modules || []).filter(m => m.moduleSelected !== false));
   });
 
-  web.get('/api/student-selections/:username', (req, res) => {
+  web.get('/api/student-selections/:username', requireAuth(null), (req, res) => {
     const db = loadDB();
     res.json(db.studentSelectedTopics[req.params.username] || []);
   });
 
-  web.post('/api/student-selections/:username', express.json({ limit: '1mb' }), (req, res) => {
+  web.post('/api/student-selections/:username', requireAuth(null), express.json({ limit: '1mb' }), (req, res) => {
     const db = loadDB();
     if (!db.studentSelectedTopics) db.studentSelectedTopics = {};
     db.studentSelectedTopics[req.params.username] = req.body.topicIds || [];
@@ -1123,25 +1530,166 @@ function startWebServer() {
     res.json({ success: true });
   });
 
-  web.post('/api/quiz-result', express.json({ limit: '10mb' }), (req, res) => {
+  web.post('/api/quiz-result', requireAuth(null), express.json({ limit: '10mb' }), (req, res) => {
     const db = loadDB();
     const resultData = req.body;
     resultData.id = db.nextResultId++;
     resultData.timestamp = new Date().toISOString();
-    resultData.ipAddress = req.ip || req.connection.remoteAddress || '';
-    resultData.systemUsername = 'WLAN-Gerät';
+    resultData.ipAddress = req.ip || req.connection?.remoteAddress || '';
+    resultData.systemUsername = req.authUser?.username || 'Browser-Gerät';
     db.results.push(resultData);
     saveDB(db);
     res.json({ success: true, id: resultData.id });
   });
 
-  // Exam mode endpoint for browser students
+  web.get('/api/quiz-results', requireAuth(['admin', 'teacher']), (_req, res) => {
+    const db = loadDB();
+    res.json((db.results || []).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
+  });
+
+  web.delete('/api/quiz-results/:id', requireAuth(['admin', 'teacher']), (req, res) => {
+    const db = loadDB();
+    db.results = db.results.filter(r => String(r.id) !== String(req.params.id));
+    saveDB(db);
+    res.json({ success: true });
+  });
+
+  web.delete('/api/quiz-results', requireAuth(['admin', 'teacher']), (_req, res) => {
+    const db = loadDB();
+    db.results = [];
+    saveDB(db);
+    res.json({ success: true });
+  });
+
   web.get('/api/exam-mode', (_req, res) => {
     const db = loadDB();
     res.json({ enabled: !!db.examMode });
   });
 
-  // QR code endpoint — generates SVG dynamically
+  web.post('/api/exam-mode', requireAuth(['admin', 'teacher']), express.json({ limit: '1mb' }), (req, res) => {
+    const db = loadDB();
+    db.examMode = !!req.body.enabled;
+    saveDB(db);
+    res.json({ success: true, enabled: db.examMode });
+  });
+
+  // ---- TEACHER/ADMIN: FULL TOPIC CRUD ----
+
+  web.get('/api/admin/topics', requireAuth(['admin', 'teacher']), (req, res) => {
+    const db = loadDB();
+    const topics = req.authUser.role === 'admin' ? db.topics : topicsForTeacher(db, req.authUser.id);
+    res.json(topics);
+  });
+
+  web.post('/api/admin/topics', requireAuth(['admin', 'teacher']), express.json({ limit: '10mb' }), (req, res) => {
+    const db = loadDB();
+    const topicData = req.body;
+    if (!topicData.id) topicData.id = 'topic_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+    topicData.ownerId = topicData.ownerId || req.authUser.id;
+    topicData.permissions = topicData.permissions || { visibleTo: 'all' };
+    topicData.modules = topicData.modules || [];
+    const idx = db.topics.findIndex(t => t.id === topicData.id);
+    if (idx >= 0) {
+      if (req.authUser.role !== 'admin' && db.topics[idx].ownerId !== req.authUser.id) {
+        return res.status(403).json({ error: 'Keine Berechtigung' });
+      }
+      // Preserve modules if not provided, and preserve sharedWith if not provided
+      topicData.modules = topicData.modules.length ? topicData.modules : (db.topics[idx].modules || []);
+      topicData.sharedWith = topicData.sharedWith !== undefined ? topicData.sharedWith : (db.topics[idx].sharedWith || []);
+      db.topics[idx] = topicData;
+    } else {
+      db.topics.push(topicData);
+    }
+    saveDB(db);
+    res.json({ success: true });
+  });
+
+  // PATCH: partial update — for toggling selected, updating sharedWith, permissions etc.
+  web.patch('/api/admin/topics/:id', requireAuth(['admin', 'teacher']), express.json({ limit: '1mb' }), (req, res) => {
+    const db = loadDB();
+    const idx = db.topics.findIndex(t => t.id === req.params.id);
+    if (idx < 0) return res.status(404).json({ error: 'Thema nicht gefunden' });
+    const topic = db.topics[idx];
+    const isOwner = topic.ownerId === req.authUser.id;
+    const isShared = Array.isArray(topic.sharedWith) && topic.sharedWith.includes(req.authUser.id);
+    if (req.authUser.role !== 'admin' && !isOwner && !isShared) {
+      return res.status(403).json({ error: 'Keine Berechtigung' });
+    }
+    // Only allow patching safe fields
+    const allowed = ['selected', 'permissions', 'sharedWith', 'title', 'description'];
+    // sharedWith can only be changed by owner or admin
+    if ('sharedWith' in req.body && req.authUser.role !== 'admin' && !isOwner) {
+      return res.status(403).json({ error: 'Nur der Eigentümer kann Freigaben ändern' });
+    }
+    for (const key of allowed) {
+      if (key in req.body) topic[key] = req.body[key];
+    }
+    saveDB(db);
+    res.json({ success: true });
+  });
+
+  web.delete('/api/admin/topics/:id', requireAuth(['admin', 'teacher']), (req, res) => {
+    const db = loadDB();
+    const idx = db.topics.findIndex(t => t.id === req.params.id);
+    if (idx < 0) return res.status(404).json({ error: 'Thema nicht gefunden' });
+    if (req.authUser.role !== 'admin' && db.topics[idx].ownerId !== req.authUser.id) {
+      return res.status(403).json({ error: 'Keine Berechtigung' });
+    }
+    db.topics.splice(idx, 1);
+    saveDB(db);
+    res.json({ success: true });
+  });
+
+  // ---- H5P UPLOAD (browser multipart — fallback for non-Electron) ----
+  web.post('/api/h5p/upload', requireAuth(['admin', 'teacher']), (req, res) => {
+    const chunks = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => {
+      try {
+        const body = Buffer.concat(chunks);
+        const contentType = req.headers['content-type'] || '';
+        const boundaryMatch = contentType.match(/boundary=([^\s;]+)/i);
+        if (!boundaryMatch) return res.status(400).json({ error: 'Kein Multipart-Boundary gefunden' });
+        const boundary = Buffer.from('--' + boundaryMatch[1]);
+        // Parse multipart manually
+        let fileBuffer = null;
+        let fileName = 'upload.h5p';
+        let importMode = req.headers['x-import-mode'] || 'native';
+        let start = 0;
+        while (start < body.length) {
+          const bIdx = body.indexOf(boundary, start);
+          if (bIdx < 0) break;
+          const partStart = bIdx + boundary.length + 2; // skip \r\n
+          const nextBIdx = body.indexOf(boundary, partStart);
+          if (nextBIdx < 0) break;
+          const partEnd = nextBIdx - 2; // trim \r\n before next boundary
+          const part = body.slice(partStart, partEnd);
+          const headerEnd = part.indexOf('\r\n\r\n');
+          if (headerEnd < 0) { start = nextBIdx; continue; }
+          const headerStr = part.slice(0, headerEnd).toString('utf8');
+          const fnMatch = headerStr.match(/filename="([^"]+)"/i);
+          if (fnMatch) {
+            fileName = fnMatch[1];
+            fileBuffer = part.slice(headerEnd + 4);
+          }
+          start = nextBIdx;
+        }
+        if (!fileBuffer || fileBuffer.length < 10) return res.status(400).json({ error: 'Keine H5P-Datei gefunden' });
+        const result = processH5pBuffer(fileBuffer, fileName, importMode);
+        if (!result.success) return res.status(400).json(result);
+        const db = loadDB();
+        result.topic.ownerId = req.authUser.id;
+        db.topics.push(result.topic);
+        saveDB(db);
+        res.json({ success: true, topicTitle: result.topic.title, importedCount: result.topic.modules.length, importMode: result.importMode });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+    req.on('error', (e) => res.status(500).json({ error: e.message }));
+  });
+
+  // QR code endpoint
   web.get('/api/qrcode.svg', async (_req, res) => {
     if (!webServerUrl) return res.status(503).send('Server not ready');
     try {
@@ -1152,11 +1700,11 @@ function startWebServer() {
     }
   });
 
-  // Serve static assets (images in content use data: URLs, but we need CSS/JS/icons)
+  // Static files
   web.use('/assets', express.static(assetsDir));
   web.use(express.static(rendererDir));
 
-  // Fallback: serve index.html for SPA-style routing
+  // SPA fallback
   web.get('*', (_req, res) => {
     res.sendFile(path.join(rendererDir, 'index.html'));
   });
@@ -1178,11 +1726,7 @@ function startWebServer() {
       const altServer = web.listen(0, '0.0.0.0', () => {
         const ip = getPreferredIP();
         const port = altServer.address().port;
-        if (ip) {
-          webServerUrl = `http://${ip}:${port}`;
-        } else {
-          webServerUrl = `http://localhost:${port}`;
-        }
+        webServerUrl = ip ? `http://${ip}:${port}` : `http://localhost:${port}`;
         console.log(`Web-Server gestartet auf alternativem Port: ${webServerUrl}`);
       });
     } else {
@@ -1190,6 +1734,8 @@ function startWebServer() {
     }
   });
 }
+
+
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -1267,21 +1813,169 @@ function getMenuTemplate() {
   ];
 }
 
-// --- IPC: Authentication ---
+// --- IPC: Authentication (Electron mode uses same DB, same users array) ---
 
 ipcMain.handle('verify-admin', (_event, username, password) => {
   const db = loadDB();
-  return db.admin.username === username && db.admin.password === password;
+  const user = findUser(db, username);
+  if (!user || (user.role !== 'admin' && user.role !== 'teacher')) return false;
+  if (!verifyPassword(password, user.passwordHash)) return false;
+  // Return role info so renderer can set correct role
+  return { success: true, role: user.role, username: user.username, displayName: user.displayName || user.username };
 });
 
 ipcMain.handle('get-admin-credentials', () => {
   const db = loadDB();
-  return { username: db.admin.username };
+  // Return summary of all teacher/admin users for informational purposes
+  return { username: (db.users.find(u => u.role === 'admin') || {}).username || 'admin' };
 });
 
 ipcMain.handle('update-admin-password', (_event, newPassword) => {
   const db = loadDB();
-  db.admin.password = newPassword;
+  const admin = db.users.find(u => u.role === 'admin');
+  if (!admin) return { success: false, error: 'Kein Admin gefunden' };
+  admin.passwordHash = hashPassword(newPassword);
+  saveDB(db);
+  return { success: true };
+});
+
+// v2.0 IPC: User management (called by Electron admin UI)
+ipcMain.handle('import-users', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    properties: ['openFile'],
+    filters: [{ name: 'Excel/CSV', extensions: ['xlsx', 'csv'] }],
+  });
+  if (canceled || filePaths.length === 0) return { success: false, canceled: true };
+  const filePath = filePaths[0];
+  try {
+    const users = parseUserImportFile(filePath);
+    const db = loadDB();
+    const created = [];
+    const skipped = [];
+    for (const row of users) {
+      const username = (row.login || '').trim();
+      const password = (row.password || '').trim();
+      const role = (row.role || '').trim().toLowerCase();
+      let className = (row.class || '').trim();
+      if (!username || !role) {
+        skipped.push({ username, reason: 'Pflichtfelder fehlen' });
+        continue;
+      }
+      if (db.users.find(u => u.username === username)) {
+        skipped.push({ username, reason: 'Benutzer existiert bereits' });
+        continue;
+      }
+      let classId = null;
+      if (className) {
+        if (!db.classes) db.classes = [];
+        let cls = db.classes.find(c => c.name === className);
+        if (!cls) {
+          cls = { id: makeClassId(), name: className, createdAt: new Date().toISOString() };
+          db.classes.push(cls);
+        }
+        classId = cls.id;
+      }
+      const newUser = {
+        id: makeUserId(),
+        username,
+        passwordHash: hashPassword(password),
+        role,
+        displayName: (row.firstname || '') + (row.lastname ? ' ' + row.lastname : '') || username,
+        classIds: classId ? [classId] : [],
+        accessFilters: { ips: [], browserUsers: [], browserDomains: [] },
+        email: row.email || '',
+      };
+      db.users.push(newUser);
+      created.push(username);
+    }
+    saveDB(db);
+    return { success: true, created, skipped, total: users.length };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('get-all-users', () => {
+  const db = loadDB();
+  return db.users.map(u => ({ id: u.id, username: u.username, displayName: u.displayName, role: u.role, classIds: u.classIds }));
+});
+
+ipcMain.handle('save-user', (_event, userData) => {
+  const db = loadDB();
+  const idx = db.users.findIndex(u => u.id === userData.id);
+  if (idx >= 0) {
+    const existing = db.users[idx];
+    existing.username = userData.username || existing.username;
+    existing.displayName = userData.displayName || existing.displayName;
+    existing.role = userData.role || existing.role;
+    existing.classIds = userData.classIds || existing.classIds || [];
+    existing.accessFilters = userData.accessFilters || existing.accessFilters;
+    if (userData.password !== undefined) existing.passwordHash = hashPassword(userData.password);
+    saveDB(db);
+    return { success: true };
+  } else {
+    if (!userData.username || !userData.role) return { success: false, error: 'username und role sind Pflicht' };
+    const newUser = {
+      id: makeUserId(),
+      username: userData.username,
+      passwordHash: hashPassword(userData.password || ''),
+      role: userData.role,
+      displayName: userData.displayName || userData.username,
+      classIds: userData.classIds || [],
+      accessFilters: userData.accessFilters || { ips: [], browserUsers: [], browserDomains: [] },
+    };
+    db.users.push(newUser);
+    saveDB(db);
+    return { success: true, id: newUser.id };
+  }
+});
+
+ipcMain.handle('delete-user', (_event, userId) => {
+  const db = loadDB();
+  const idx = db.users.findIndex(u => u.id === userId);
+  if (idx < 0) return { success: false, error: 'Benutzer nicht gefunden' };
+  db.users.splice(idx, 1);
+  saveDB(db);
+  return { success: true };
+});
+
+ipcMain.handle('get-all-classes', () => {
+  const db = loadDB();
+  return db.classes || [];
+});
+
+ipcMain.handle('save-class', (_event, classData) => {
+  const db = loadDB();
+  if (!db.classes) db.classes = [];
+  const idx = db.classes.findIndex(c => c.id === classData.id);
+  if (idx >= 0) {
+    db.classes[idx] = { ...db.classes[idx], ...classData };
+  } else {
+    db.classes.push({ id: makeClassId(), ...classData, createdAt: new Date().toISOString() });
+  }
+  saveDB(db);
+  return { success: true };
+});
+
+ipcMain.handle('delete-class', (_event, classId) => {
+  const db = loadDB();
+  if (!db.classes) return { success: false };
+  db.classes = db.classes.filter(c => c.id !== classId);
+  for (const u of db.users) {
+    if (Array.isArray(u.classIds)) u.classIds = u.classIds.filter(cid => cid !== classId);
+  }
+  saveDB(db);
+  return { success: true };
+});
+
+ipcMain.handle('get-app-settings', () => {
+  const db = loadDB();
+  return db.settings || {};
+});
+
+ipcMain.handle('save-app-settings', (_event, settings) => {
+  const db = loadDB();
+  Object.assign(db.settings, settings);
   saveDB(db);
   return { success: true };
 });
@@ -1322,6 +2016,15 @@ ipcMain.handle('toggle-topic-selection', (_event, topicId, selected) => {
     topic.selected = selected;
     saveDB(db);
   }
+  return { success: true };
+});
+
+ipcMain.handle('set-topic-sharing', (_event, topicId, sharedWith) => {
+  const db = loadDB();
+  const topic = db.topics.find((t) => t.id === topicId);
+  if (!topic) return { success: false, error: 'Thema nicht gefunden' };
+  topic.sharedWith = Array.isArray(sharedWith) ? sharedWith : [];
+  saveDB(db);
   return { success: true };
 });
 
@@ -1667,7 +2370,108 @@ ipcMain.handle('get-web-server-url', () => {
   return webServerUrl;
 });
 
-// --- IPC: H5P Import ---
+// --- H5P Import (shared logic — used by Electron IPC and web upload) ---
+
+function processH5pBuffer(buffer, fileName, importMode = 'native') {
+  let entries;
+  try { entries = readZip(buffer); }
+  catch (e) { return { success: false, error: 'Ungültige H5P-Datei: ' + e.message }; }
+
+  if (!entries['h5p.json']) return { success: false, error: 'h5p.json fehlt in der H5P-Datei' };
+  let h5pMeta;
+  try { h5pMeta = JSON.parse(entries['h5p.json'].toString('utf8')); }
+  catch { return { success: false, error: 'Fehler beim Lesen von h5p.json' }; }
+
+  if (!entries['content/content.json']) return { success: false, error: 'content/content.json fehlt in der H5P-Datei' };
+  let contentData;
+  try { contentData = JSON.parse(entries['content/content.json'].toString('utf8')); }
+  catch { return { success: false, error: 'Fehler beim Lesen von content/content.json' }; }
+
+  const mimeByExt = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp' };
+  const h5pImages = {};
+  for (const [entryName, entryData] of Object.entries(entries)) {
+    if (entryName.startsWith('content/images/')) {
+      const imgName = path.basename(entryName);
+      const ext = path.extname(imgName).toLowerCase().slice(1);
+      h5pImages[imgName] = `data:${mimeByExt[ext] || 'image/png'};base64,${entryData.toString('base64')}`;
+    }
+  }
+
+  const mainLibrary = h5pMeta.mainLibrary || '';
+  const baseName = path.basename(fileName, '.h5p');
+  const topicTitle = h5pMeta.title || h5pMeta.extraTitle || baseName;
+  const rawItems = mainLibrary === 'H5P.QuestionSet'
+    ? (Array.isArray(contentData.questions) ? contentData.questions : []).map((q, idx) => ({
+        title: (q.metadata && q.metadata.title) || `Aufgabe ${idx + 1}`,
+        library: q.library || '',
+      }))
+    : [{ title: topicTitle, library: mainLibrary }];
+  const h5pRawSummary = { mainLibrary, itemCount: rawItems.length, items: rawItems };
+
+  if (importMode === 'raw') {
+    const topic = {
+      id: 'topic_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
+      title: topicTitle,
+      description: `Als H5P-Projekt importiert (${mainLibrary})`,
+      selected: false,
+      createdAt: new Date().toISOString(),
+      modules: [],
+      h5pImages,
+      h5pMeta: { mainLibrary, title: topicTitle },
+      h5pRawSummary,
+      h5pImportMode: 'raw',
+      h5pRawPackage: { fileName, dataBase64: buffer.toString('base64'), importedAt: new Date().toISOString() },
+      permissions: { visibleTo: 'all' },
+    };
+    return { success: true, topic, importMode: 'raw' };
+  }
+
+  const modules = [];
+  if (mainLibrary === 'H5P.QuestionSet') {
+    for (const q of (Array.isArray(contentData.questions) ? contentData.questions : [])) {
+      const machineName = (q.library || '').split(' ')[0];
+      const converted = convertH5pToNative(machineName, q.params || {}, h5pImages);
+      const sourceSubContentId = q.subContentId || h5pUuid();
+      modules.push({
+        id: 'mod_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
+        title: (q.metadata && q.metadata.title) || 'Aufgabe',
+        type: converted ? converted.type : 'h5p_native',
+        description: (q.metadata && q.metadata.contentType) || machineName.replace('H5P.', ''),
+        content: converted ? converted.content : { library: q.library || '', machineName, params: q.params || {}, subContentId: sourceSubContentId },
+        h5pSource: { library: q.library || '', machineName, params: q.params || {}, metadata: q.metadata || {}, subContentId: sourceSubContentId },
+        moduleSelected: true, createdAt: new Date().toISOString(),
+      });
+    }
+  } else {
+    const converted = convertH5pToNative(mainLibrary, contentData, h5pImages);
+    const sourceSubContentId = h5pUuid();
+    modules.push({
+      id: 'mod_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
+      title: h5pMeta.title || h5pMeta.extraTitle || baseName,
+      type: converted ? converted.type : 'h5p_native',
+      description: mainLibrary.replace('H5P.', ''),
+      content: converted ? converted.content : { library: mainLibrary, machineName: mainLibrary, params: contentData, subContentId: sourceSubContentId },
+      h5pSource: { library: mainLibrary, machineName: mainLibrary, params: contentData,
+        metadata: { contentType: mainLibrary.replace('H5P.', ''), title: topicTitle, extraTitle: topicTitle, license: 'U', authors: [], changes: [] },
+        subContentId: sourceSubContentId },
+      moduleSelected: true, createdAt: new Date().toISOString(),
+    });
+  }
+
+  const topic = {
+    id: 'topic_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
+    title: topicTitle,
+    description: `Importiert aus H5P (${mainLibrary})`,
+    selected: false,
+    createdAt: new Date().toISOString(),
+    modules,
+    h5pImages,
+    h5pMeta: { mainLibrary, title: topicTitle },
+    h5pImportMode: 'native',
+    permissions: { visibleTo: 'all' },
+  };
+  return { success: true, topic, importMode: 'native' };
+}
 
 ipcMain.handle('import-h5p', async (_event, options = {}) => {
   const importMode = options && options.importMode === 'raw' ? 'raw' : 'native';
@@ -1679,176 +2483,19 @@ ipcMain.handle('import-h5p', async (_event, options = {}) => {
   if (canceled || filePaths.length === 0) return { success: false };
 
   let buffer;
-  try {
-    buffer = fs.readFileSync(filePaths[0]);
-  } catch (e) {
-    return { success: false, error: 'Datei konnte nicht gelesen werden: ' + e.message };
-  }
+  try { buffer = fs.readFileSync(filePaths[0]); }
+  catch (e) { return { success: false, error: 'Datei konnte nicht gelesen werden: ' + e.message }; }
 
-  let entries;
-  try {
-    entries = readZip(buffer);
-  } catch (e) {
-    return { success: false, error: 'Ungültige H5P-Datei: ' + e.message };
-  }
-
-  if (!entries['h5p.json'])
-    return { success: false, error: 'h5p.json fehlt in der H5P-Datei' };
-
-  let h5pMeta;
-  try {
-    h5pMeta = JSON.parse(entries['h5p.json'].toString('utf8'));
-  } catch {
-    return { success: false, error: 'Fehler beim Lesen von h5p.json' };
-  }
-
-  if (!entries['content/content.json'])
-    return { success: false, error: 'content/content.json fehlt in der H5P-Datei' };
-
-  let contentData;
-  try {
-    contentData = JSON.parse(entries['content/content.json'].toString('utf8'));
-  } catch {
-    return { success: false, error: 'Fehler beim Lesen von content/content.json' };
-  }
-
-  // Collect embedded images as base64 data URLs
-  const h5pImages = {};
-  const mimeByExt = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp' };
-  for (const [entryName, entryData] of Object.entries(entries)) {
-    if (entryName.startsWith('content/images/')) {
-      const imgName = path.basename(entryName);
-      const ext = path.extname(imgName).toLowerCase().slice(1);
-      const mime = mimeByExt[ext] || 'image/png';
-      h5pImages[imgName] = `data:${mime};base64,${entryData.toString('base64')}`;
-    }
-  }
-
-  const mainLibrary = h5pMeta.mainLibrary || '';
-  const topicTitle = h5pMeta.title || h5pMeta.extraTitle || path.basename(filePaths[0], '.h5p');
-  const rawItems = mainLibrary === 'H5P.QuestionSet'
-    ? (Array.isArray(contentData.questions) ? contentData.questions : []).map((q, idx) => ({
-        title: (q.metadata && q.metadata.title) || `Aufgabe ${idx + 1}`,
-        library: q.library || '',
-      }))
-    : [{
-        title: topicTitle,
-        library: mainLibrary,
-      }];
-  const h5pRawSummary = {
-    mainLibrary,
-    itemCount: rawItems.length,
-    items: rawItems,
-  };
-
-  // Raw mode: keep original package unchanged for true roundtrip export
-  if (importMode === 'raw') {
-    const db = loadDB();
-    const newTopic = {
-      id: 'topic_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
-      title: topicTitle,
-      description: `Als H5P-Projekt importiert (${mainLibrary})`,
-      selected: false,
-      createdAt: new Date().toISOString(),
-      modules: [],
-      h5pImages,
-      h5pMeta: { mainLibrary, title: topicTitle },
-      h5pRawSummary,
-      h5pImportMode: 'raw',
-      h5pRawPackage: {
-        fileName: path.basename(filePaths[0]),
-        dataBase64: buffer.toString('base64'),
-        importedAt: new Date().toISOString(),
-      },
-    };
-    db.topics.push(newTopic);
-    saveDB(db);
-    return { success: true, topicTitle, importedCount: rawItems.length, importMode: 'raw' };
-  }
-
-  const modules = [];
-
-  if (mainLibrary === 'H5P.QuestionSet') {
-    const questions = Array.isArray(contentData.questions) ? contentData.questions : [];
-    for (const q of questions) {
-      const machineName = (q.library || '').split(' ')[0];
-      const converted = convertH5pToNative(machineName, q.params || {}, h5pImages);
-      const sourceSubContentId = q.subContentId || h5pUuid();
-      modules.push({
-        id: 'mod_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
-        title: (q.metadata && q.metadata.title) || 'Aufgabe',
-        type: converted ? converted.type : 'h5p_native',
-        description: (q.metadata && q.metadata.contentType) || machineName.replace('H5P.', ''),
-        content: converted
-          ? converted.content
-          : {
-              library: q.library || '',
-              machineName,
-              params: q.params || {},
-              subContentId: sourceSubContentId,
-            },
-        h5pSource: {
-          library: q.library || '',
-          machineName,
-          params: q.params || {},
-          metadata: q.metadata || {},
-          subContentId: sourceSubContentId,
-        },
-        moduleSelected: true,
-        createdAt: new Date().toISOString(),
-      });
-    }
-  } else {
-    const converted = convertH5pToNative(mainLibrary, contentData, h5pImages);
-    const sourceSubContentId = h5pUuid();
-    modules.push({
-      id: 'mod_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
-      title: h5pMeta.title || h5pMeta.extraTitle || path.basename(filePaths[0], '.h5p'),
-      type: converted ? converted.type : 'h5p_native',
-      description: mainLibrary.replace('H5P.', ''),
-      content: converted
-        ? converted.content
-        : {
-            library: mainLibrary,
-            machineName: mainLibrary,
-            params: contentData,
-            subContentId: sourceSubContentId,
-          },
-      h5pSource: {
-        library: mainLibrary,
-        machineName: mainLibrary,
-        params: contentData,
-        metadata: {
-          contentType: mainLibrary.replace('H5P.', ''),
-          title: topicTitle,
-          extraTitle: topicTitle,
-          license: 'U',
-          authors: [],
-          changes: [],
-        },
-        subContentId: sourceSubContentId,
-      },
-      moduleSelected: true,
-      createdAt: new Date().toISOString(),
-    });
-  }
+  const result = processH5pBuffer(buffer, path.basename(filePaths[0]), importMode);
+  if (!result.success) return result;
 
   const db = loadDB();
-  const newTopic = {
-    id: 'topic_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
-    title: topicTitle,
-    description: `Importiert aus H5P (${mainLibrary})`,
-    selected: false,
-    createdAt: new Date().toISOString(),
-    modules,
-    h5pImages,
-    h5pMeta: { mainLibrary, title: topicTitle },
-    h5pImportMode: 'native',
-  };
-  db.topics.push(newTopic);
+  // Assign ownerId if missing (for Electron mode: use first admin)
+  const firstAdmin = db.users.find(u => u.role === 'admin');
+  result.topic.ownerId = firstAdmin ? firstAdmin.id : null;
+  db.topics.push(result.topic);
   saveDB(db);
-
-  return { success: true, topicTitle, importedCount: modules.length, importMode: 'native' };
+  return { success: true, topicTitle: result.topic.title, importedCount: result.topic.modules.length, importMode: result.importMode };
 });
 
 // --- IPC: H5P Export ---
@@ -2037,15 +2684,22 @@ ipcMain.handle('export-selected-modules-as-h5p', async (_event, topicId) => {
 
 // --- App lifecycle ---
 
-app.whenReady().then(() => {
-  createWindow();
+if (IS_SERVER_MODE) {
+  console.log('--- LearningModules SERVER MODE ---');
+  console.log('Running as standalone web server for students.');
+  console.log(`Data directory: ${DATA_DIR}`);
   startWebServer();
-});
+} else {
+  app.whenReady().then(() => {
+    createWindow();
+    startWebServer();
+  });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit();
+  });
 
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
-});
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+}

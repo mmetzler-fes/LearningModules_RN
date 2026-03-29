@@ -1,0 +1,11 @@
+{
+  "admin": {
+    "username": "admin",
+    "password": "lehrer1"
+  },
+  "topics": [],
+  "examMode": false,
+  "results": [],
+  "studentSelectedTopics": {},
+  "nextResultId": 1
+}

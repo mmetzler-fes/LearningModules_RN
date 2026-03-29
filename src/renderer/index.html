@@ -31,6 +31,11 @@
             <label for="loginName" data-i18n="login.name.label">Dein Name</label>
             <input type="text" id="loginName" required data-i18n-placeholder="login.name.placeholder" placeholder="Name eingeben..." autocomplete="off" />
           </div>
+          <div class="form-group" id="loginPasswordGroup">
+            <label for="loginPassword">Passwort</label>
+            <input type="password" id="loginPassword" data-i18n-placeholder="login.password.placeholder" placeholder="Passwort..." />
+          </div>
+          <p id="studentLoginError" class="login-error hidden">Anmeldung fehlgeschlagen.</p>
           <button type="submit" class="btn btn-primary btn-full" id="btnStudentLogin" data-i18n="login.student">🎓 Als Schüler anmelden</button>
         </form>
         <div class="login-divider"><span data-i18n="login.or">oder</span></div>
@@ -80,6 +85,20 @@
         </button>
         <button class="nav-btn" data-view="teacher-results">
           <span class="nav-icon">📊</span> <span data-i18n="nav.results">Ergebnisse</span>
+        </button>
+      </nav>
+
+      <!-- Admin-only Navigation (only visible to admin role) -->
+      <nav class="sidebar-nav hidden" id="adminNav">
+        <div class="nav-section-label">Administration</div>
+        <button class="nav-btn" data-view="admin-users">
+          <span class="nav-icon">👥</span> Benutzerverwaltung
+        </button>
+        <button class="nav-btn" data-view="admin-classes">
+          <span class="nav-icon">🏫</span> Klassenverwaltung
+        </button>
+        <button class="nav-btn" data-view="admin-settings">
+          <span class="nav-icon">⚙️</span> Einstellungen
         </button>
       </nav>
 
@@ -334,7 +353,141 @@
         <div id="quizResultArea" class="quiz-result-area hidden"></div>
       </section>
 
-      <!-- H5P Player View (for previewing modules in teacher mode) -->
+      <!-- ==================== ADMIN VIEWS ==================== -->
+
+      <!-- Admin: User Management -->
+      <section class="view" id="view-admin-users">
+        <div class="view-header">
+          <h2>Benutzerverwaltung</h2>
+          <p class="subtitle">Lehrer, Admins und Schüler verwalten</p>
+          <div class="header-actions">
+            <button class="btn btn-primary" id="btnNewUser">➕ Neuer Benutzer</button>
+            <button class="btn btn-secondary" id="btnImportUsers">📥 Nutzer importieren</button>
+          </div>
+                <!-- User Import Dialog (hidden) -->
+                <div id="userImportOverlay" class="confirm-overlay hidden">
+                  <div class="import-modules-card" style="min-width:380px;max-width:500px">
+                    <h3>Nutzer importieren (Excel/CSV)</h3>
+                    <form id="userImportForm">
+                      <div class="form-group">
+                        <label for="userImportFile">Datei auswählen (.xlsx oder .csv)</label>
+                        <input type="file" id="userImportFile" accept=".xlsx,.csv" required />
+                      </div>
+                      <div class="form-group">
+                        <a href="assets/example-user-import.xlsx.txt" download style="font-size:0.95em">Beispiel-Excel herunterladen</a>
+                      </div>
+                      <div class="form-group">
+                        <b>Erwartete Spalten:</b>
+                        <div style="font-family:monospace;font-size:1em;margin-top:2px;">login, password, class, role, firstname, lastname, email</div>
+                        <div style="font-size:0.95em;color:var(--text-secondary);margin-top:2px;">(Nicht benötigte Felder können leer bleiben. Schüler und Lehrer gemeinsam möglich.)</div>
+                      </div>
+                      <div class="confirm-actions">
+                        <button type="submit" class="btn btn-primary">Importieren</button>
+                        <button type="button" class="btn btn-secondary" id="btnCancelUserImport">Abbrechen</button>
+                      </div>
+                      <div id="userImportResult" style="margin-top:10px;font-size:0.98em;"></div>
+                    </form>
+                  </div>
+                </div>
+        </div>
+        <div class="admin-tabs">
+          <button class="admin-tab active" data-filter="all">Alle</button>
+          <button class="admin-tab" data-filter="admin">Admins</button>
+          <button class="admin-tab" data-filter="teacher">Lehrer</button>
+          <button class="admin-tab" data-filter="student">Schüler</button>
+        </div>
+        <div id="usersList" class="admin-list"></div>
+
+        <!-- User Form (hidden) -->
+        <div id="userFormOverlay" class="confirm-overlay hidden">
+          <div class="import-modules-card" style="min-width:380px;max-width:500px">
+            <h3 id="userFormTitle">Neuer Benutzer</h3>
+            <form id="userForm">
+              <input type="hidden" id="userFormId" />
+              <div class="form-group">
+                <label for="userFormUsername">Benutzername *</label>
+                <input type="text" id="userFormUsername" required placeholder="z.B. lehrer1" autocomplete="off" />
+              </div>
+              <div class="form-group">
+                <label for="userFormDisplayName">Anzeigename</label>
+                <input type="text" id="userFormDisplayName" placeholder="z.B. Max Mustermann" />
+              </div>
+              <div class="form-group">
+                <label for="userFormRole">Rolle *</label>
+                <select id="userFormRole">
+                  <option value="student">Schüler</option>
+                  <option value="teacher">Lehrer</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="userFormPassword">Passwort <span id="userPasswordHint" style="font-size:0.85em;color:var(--text-secondary)">(leer = kein Passwort nötig)</span></label>
+                <input type="password" id="userFormPassword" placeholder="Passwort (leer lassen = unveränderlich lassen)" autocomplete="new-password" />
+              </div>
+              <div class="form-group" id="userFormClassesGroup">
+                <label>Klassen</label>
+                <div id="userFormClassesList" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;"></div>
+              </div>
+              <div class="confirm-actions">
+                <button type="submit" class="btn btn-primary">Speichern</button>
+                <button type="button" class="btn btn-secondary" id="btnCancelUser">Abbrechen</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- Admin: Class Management -->
+      <section class="view" id="view-admin-classes">
+        <div class="view-header">
+          <h2>Klassenverwaltung</h2>
+          <p class="subtitle">Klassen erstellen und Schüler zuweisen</p>
+          <div class="header-actions">
+            <button class="btn btn-primary" id="btnNewClass">➕ Neue Klasse</button>
+          </div>
+        </div>
+        <div id="classesList" class="admin-list"></div>
+
+        <!-- Class Form (hidden) -->
+        <div id="classFormOverlay" class="confirm-overlay hidden">
+          <div class="import-modules-card" style="min-width:340px">
+            <h3 id="classFormTitle">Neue Klasse</h3>
+            <form id="classForm">
+              <input type="hidden" id="classFormId" />
+              <div class="form-group">
+                <label for="classFormName">Klassenname *</label>
+                <input type="text" id="classFormName" required placeholder="z.B. Klasse 7a" />
+              </div>
+              <div class="confirm-actions">
+                <button type="submit" class="btn btn-primary">Speichern</button>
+                <button type="button" class="btn btn-secondary" id="btnCancelClass">Abbrechen</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- Admin: Settings -->
+      <section class="view" id="view-admin-settings">
+        <div class="view-header">
+          <h2>Einstellungen</h2>
+          <p class="subtitle">Globale Anwendungseinstellungen</p>
+        </div>
+        <div class="settings-panel">
+          <div class="settings-group">
+            <h3>Schüler-Login</h3>
+            <label class="setting-toggle-row">
+              <span>Leere Passwörter für Schüler erlauben</span>
+              <input type="checkbox" id="settingAllowEmptyStudentPwd" />
+            </label>
+            <p class="settings-hint">Wenn aktiv, können Schüler ohne Passwort einloggen (Name reicht).</p>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" id="btnSaveSettings">💾 Einstellungen speichern</button>
+          </div>
+        </div>
+      </section>
+
       <section class="view" id="view-player">
         <div class="view-header">
           <div class="player-header">

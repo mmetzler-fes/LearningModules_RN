@@ -2466,3 +2466,143 @@ body {
   border-radius: var(--radius-sm);
   border-left: 3px solid var(--accent);
 }
+
+/* ==================== v2.0 Admin UI Styles ==================== */
+
+/* User role badges */
+.user-role-badge {
+  display: inline-block;
+  font-size: 0.75em;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 99px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.user-role-badge.admin   { background: #8b5cf6; color: #fff; }
+.user-role-badge.teacher { background: var(--accent); color: #fff; }
+.user-role-badge.student { background: #10b981; color: #fff; }
+
+/* Admin nav section */
+.nav-section-label {
+  font-size: 0.7em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  padding: 14px 16px 4px;
+}
+
+/* Admin list */
+.admin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 0 16px;
+}
+.admin-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  transition: box-shadow 0.15s;
+}
+.admin-list-item:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.admin-list-item-info {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.admin-list-item-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Admin filter tabs */
+.admin-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 2px solid var(--border);
+  padding-bottom: 0;
+}
+.admin-tab {
+  background: none;
+  border: none;
+  padding: 8px 16px;
+  font-size: 0.9em;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  border-radius: 0;
+  transition: color 0.15s, border-color 0.15s;
+}
+.admin-tab:hover { color: var(--text-primary); }
+.admin-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Settings panel */
+.settings-panel {
+  max-width: 560px;
+}
+.settings-group {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+.settings-group h3 {
+  margin: 0 0 12px;
+  font-size: 1em;
+  font-weight: 700;
+}
+.setting-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+  font-size: 0.95em;
+}
+.settings-hint {
+  font-size: 0.82em;
+  color: var(--text-secondary);
+  margin: 8px 0 0;
+}
+
+/* Login error */
+.login-error {
+  color: #dc2626;
+  font-size: 0.87em;
+  margin: 4px 0 8px;
+}
+
+/* Small button variant */
+.btn.btn-sm {
+  font-size: 0.78em;
+  padding: 4px 10px;
+}
+
+/* Topic sharing badges */
+.topic-shared-badge {
+  display: inline-block;
+  font-size: 0.75em;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.topic-shared-badge.owner {
+  background: #dcfce7;
+  color: #166534;
+}

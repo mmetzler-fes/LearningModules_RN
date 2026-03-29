@@ -1,10 +1,25 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
-  // Authentication
+  // Authentication (v2.0 — uses users array, hashed passwords)
   verifyAdmin: (username, password) => ipcRenderer.invoke('verify-admin', username, password),
   getAdminCredentials: () => ipcRenderer.invoke('get-admin-credentials'),
   updateAdminPassword: (newPassword) => ipcRenderer.invoke('update-admin-password', newPassword),
+
+  // v2.0 User Management (IPC for Electron mode)
+  getAllUsers: () => ipcRenderer.invoke('get-all-users'),
+  saveUser: (userData) => ipcRenderer.invoke('save-user', userData),
+  deleteUser: (userId) => ipcRenderer.invoke('delete-user', userId),
+  importUsers: () => ipcRenderer.invoke('import-users'),
+
+  // v2.0 Class Management
+  getAllClasses: () => ipcRenderer.invoke('get-all-classes'),
+  saveClass: (classData) => ipcRenderer.invoke('save-class', classData),
+  deleteClass: (classId) => ipcRenderer.invoke('delete-class', classId),
+
+  // v2.0 App Settings
+  getAppSettings: () => ipcRenderer.invoke('get-app-settings'),
+  saveAppSettings: (settings) => ipcRenderer.invoke('save-app-settings', settings),
 
   // Topics CRUD
   getTopics: () => ipcRenderer.invoke('get-topics'),
@@ -13,6 +28,7 @@ contextBridge.exposeInMainWorld('api', {
   saveTopic: (topicData) => ipcRenderer.invoke('save-topic', topicData),
   deleteTopic: (topicId) => ipcRenderer.invoke('delete-topic', topicId),
   toggleTopicSelection: (topicId, selected) => ipcRenderer.invoke('toggle-topic-selection', topicId, selected),
+  setTopicSharing: (topicId, sharedWith) => ipcRenderer.invoke('set-topic-sharing', topicId, sharedWith),
 
   // Modules CRUD (within a topic)
   getTopicModules: (topicId) => ipcRenderer.invoke('get-topic-modules', topicId),
@@ -53,7 +69,7 @@ contextBridge.exposeInMainWorld('api', {
   onMenuImport: (callback) => ipcRenderer.on('menu-import', callback),
   onMenuExport: (callback) => ipcRenderer.on('menu-export', callback),
 
-  // Window focus recovery (fixes Electron focus corruption after native dialogs)
+  // Window focus recovery
   focusWindow: () => ipcRenderer.send('focus-window'),
 
   // Web server URL for WLAN access

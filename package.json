@@ -10,7 +10,10 @@
     "build": "electron-builder",
     "build:linux": "electron-builder --linux",
     "build:win": "electron-builder --win",
-    "build:mac": "electron-builder --mac"
+    "build:mac": "electron-builder --mac",
+    "start:server": "node src/main/main.js --server",
+    "build:docker": "docker build -t learningmodules-server:latest . && mkdir -p dist && docker save learningmodules-server:latest > dist/learningmodules-server.tar",
+    "build:docker-arm64": "docker buildx build --platform linux/arm64 -t learningmodules-server:latest . --load && mkdir -p dist && docker save learningmodules-server:latest > dist/learningmodules-server.tar"
   },
   "keywords": [
     "h5p",
@@ -23,7 +26,9 @@
   "dependencies": {
     "express": "^4.22.1",
     "h5p-standalone": "^3.8.0",
-    "qrcode": "^1.5.4"
+    "multer": "^2.1.1",
+    "qrcode": "^1.5.4",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "electron": "^35.7.5",
@@ -43,8 +48,20 @@
     ],
     "linux": {
       "target": [
-        "AppImage",
-        "deb"
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "icon": "assets/icons/",
       "category": "Education"

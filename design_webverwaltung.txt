@@ -1,0 +1,26 @@
+User des schueler logins
+schueler werden klassen zugeordnet.
+klassen können von lehrern oder admins freigegebene inhalte auswählen und verwenden
+
+User des lehrer logins werden in Rollen verwaltet:
+admin-rolle kann alles
+lehrer-rolle kann lernthemen erstellen und eigene inhalte exportieren und mit anderen teilen (freigeben)
+
+Die Rollen sollen folgende Filterfunktionen haben, mit denen ein Login eingeschränkt werden kann:
+- login user (vom login)
+- login pwd (hinterlegt)
+- browser user name (kann als Eintschränkung auf bestimmte Werte gefiltert werden)
+- browser user domain (kann als Eintschränkung auf bestimmte Werte gefiltert werden)
+- ip (kann als Eintschränkung auf bestimmte Werte gefiltert werden)
+
+Wenn die Filteraktionen aktiviert sind und der Browser user diese nicht erfüllt, soll das lehrerlogin gar nicht erst angezeigt werden.
+
+Verwaltungsfunktionen:
+setzen von allen Passwörten (admin)
+setzen von schueler Passwörten (lehrer)
+ändern, hinzufügen, löschen von lehrern, admins (admin)
+
+Berechtigungsfunktionen:
+Lernthemen werden dem login user zugeordnet der sie erstellt (owner)
+Durch import wird der user owner des lernthemas
+Owner und admins können die Berechtigung einstellen wer darauf zugreifen kann (z.B. schueler, lehrer, klassen) 
