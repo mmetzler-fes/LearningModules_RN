@@ -92,7 +92,9 @@ function makeToken(user) {
 function requireAuth(roles) {
   return (req, res, next) => {
     const authHeader = req.headers['authorization'] || '';
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    let token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    if (!token && req.query.token) token = req.query.token; // Support token in query for downloads
+
     const payload = verifyToken(token);
     if (!payload) return res.status(401).json({ error: 'Nicht authentifiziert' });
     if (roles && !roles.includes(payload.role)) return res.status(403).json({ error: 'Keine Berechtigung' });
@@ -1311,7 +1313,19 @@ function startWebServer() {
     res.json({ success: true, settings: db.settings });
   });
 
-  // ---- ADMIN: USER MANAGEMENT ----
+  web.get('/api/admin/topics/:id/export-h5p', requireAuth(['admin', 'teacher', 'student']), (req, res) => {
+    const topicId = req.params.id;
+    const result = generateH5pBuffer(topicId);
+    if (!result.success) {
+      return res.status(result.error === 'Thema nicht gefunden' ? 404 : 500).json({ error: result.error });
+    }
+    const safeName = (result.topicTitle || 'export').replace(/[^\w\säöüÄÖÜß-]/g, '_');
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.h5p"`);
+    res.send(result.buffer);
+  });
+
+  // --- ADMIN: USER MANAGEMENT ----
 
   web.get('/api/admin/users', requireAuth(['admin', 'teacher']), (req, res) => {
     const db = loadDB();
@@ -2576,24 +2590,23 @@ ipcMain.handle('import-h5p', async (_event, options = {}) => {
 
 // --- IPC: H5P Export ---
 
-ipcMain.handle('export-topic-as-h5p', async (_event, topicId) => {
+/**
+ * Gemeinsame Funktion zur Generierung eines H5P-Puffers für ein Thema (QuestionSet).
+ */
+function generateH5pBuffer(topicId) {
   const db = loadDB();
   const topic = db.topics.find((t) => t.id === topicId);
   if (!topic) return { success: false, error: 'Thema nicht gefunden' };
 
-  const safeName = (topic.title || 'export').replace(/[^\w\säöüÄÖÜß-]/g, '_');
-  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-    title: 'Thema als H5P exportieren',
-    defaultPath: `${safeName}.h5p`,
-    filters: [{ name: 'H5P-Dateien', extensions: ['h5p'] }],
-  });
-  if (canceled || !filePath) return { success: false };
-
   // Raw import mode: export original package unchanged
   if (topic.h5pImportMode === 'raw' && topic.h5pRawPackage && topic.h5pRawPackage.dataBase64) {
     try {
-      fs.writeFileSync(filePath, Buffer.from(topic.h5pRawPackage.dataBase64, 'base64'));
-      return { success: true, filePath, exportedMode: 'raw' };
+      return {
+        success: true,
+        buffer: Buffer.from(topic.h5pRawPackage.dataBase64, 'base64'),
+        topicTitle: topic.title,
+        exportedMode: 'raw'
+      };
     } catch (e) {
       return { success: false, error: e.message };
     }
@@ -2606,7 +2619,6 @@ ipcMain.handle('export-topic-as-h5p', async (_event, topicId) => {
       const converted = convertNativeModuleToH5pQuestion(mod, topic.h5pImages || {});
       if (!converted) return null;
       Object.assign(exportImages, converted.addedImages || {});
-      // Some types (e.g. trueFalse) return multiple questions
       if (converted.questions) return converted.questions;
       return converted.question;
     })
@@ -2636,8 +2648,8 @@ ipcMain.handle('export-topic-as-h5p', async (_event, topicId) => {
   };
 
   const zipFiles = {
-    'h5p.json':                Buffer.from(JSON.stringify(h5pJson,    null, 2), 'utf8'),
-    'content/content.json':   Buffer.from(JSON.stringify(contentJson, null, 2), 'utf8'),
+    'h5p.json':              Buffer.from(JSON.stringify(h5pJson,    null, 2), 'utf8'),
+    'content/content.json': Buffer.from(JSON.stringify(contentJson, null, 2), 'utf8'),
   };
   for (const [imgName, dataUrl] of Object.entries(exportImages)) {
     const b64 = dataUrl.split(',')[1];
@@ -2645,8 +2657,32 @@ ipcMain.handle('export-topic-as-h5p', async (_event, topicId) => {
   }
 
   try {
-    fs.writeFileSync(filePath, createZip(zipFiles));
-    return { success: true, filePath, exportedMode: 'native' };
+    return {
+      success: true,
+      buffer: createZip(zipFiles),
+      topicTitle: topic.title,
+      exportedMode: 'native'
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+ipcMain.handle('export-topic-as-h5p', async (_event, topicId) => {
+  const result = generateH5pBuffer(topicId);
+  if (!result.success) return result;
+
+  const safeName = (result.topicTitle || 'export').replace(/[^\w\säöüÄÖÜß-]/g, '_');
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: 'Thema als H5P exportieren',
+    defaultPath: `${safeName}.h5p`,
+    filters: [{ name: 'H5P-Dateien', extensions: ['h5p'] }],
+  });
+  if (canceled || !filePath) return { success: false };
+
+  try {
+    fs.writeFileSync(filePath, result.buffer);
+    return { success: true, filePath, exportedMode: result.exportedMode };
   } catch (e) {
     return { success: false, error: e.message };
   }

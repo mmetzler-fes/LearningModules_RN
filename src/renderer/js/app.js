@@ -213,8 +213,15 @@ const browserApi = {
     };
     input.click();
   }),
-  exportTopicAsH5p: () => Promise.resolve({ success: false, error: 'H5P-Export nur im Desktop-Modus' }),
-  exportSelectedModulesAsH5p: () => Promise.resolve({ success: false, error: 'H5P-Export nur im Desktop-Modus' }),
+  exportTopicAsH5p: async (topicId) => {
+    const token = authStore.getToken();
+    const url = `/api/admin/topics/${topicId}/export-h5p${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.click();
+    return { success: true };
+  },
+  exportSelectedModulesAsH5p: (topicId) => Promise.resolve({ success: false, error: 'Einzel-Export nur im Desktop-Modus' }),
 
   // Student selections
   getSelectedTopics: () => authStore.authFetch('/api/selected-topics'),
