@@ -143,6 +143,7 @@ const TRANSLATIONS = {
     'quiz.module.of': 'Modul {current} von {total}:',
     'quiz.complete': 'Quiz abgeschlossen!',
     'quiz.topic': 'Thema',
+    'quiz.prev': '← Zurück',
     'quiz.restart': '🔄 Neues Quiz',
 
     // Common
@@ -310,6 +311,7 @@ const TRANSLATIONS = {
     'quiz.module.of': 'Module {current} of {total}:',
     'quiz.complete': 'Quiz Complete!',
     'quiz.topic': 'Topic',
+    'quiz.prev': '← Back',
     'quiz.restart': '🔄 New Quiz',
 
     // Common

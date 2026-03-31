@@ -4,26 +4,11 @@ const os = require('os');
 const zlib = require('zlib');
 const crypto = require('crypto');
 
-const IS_SERVER_MODE = process.argv.includes('--server') || process.env.SERVER_MODE === 'true';
-const PORT = process.env.PORT || 3000;
-
-const { app, BrowserWindow, ipcMain, dialog, Menu } = IS_SERVER_MODE
-  ? { app: null, BrowserWindow: null, ipcMain: { handle: () => {}, on: () => {} }, dialog: null, Menu: null }
-  : require('electron');
-
-// Linux: disable GPU/hardware acceleration to prevent SIGSEGV crashes
-if (process.platform === 'linux' && !IS_SERVER_MODE) {
-  app.disableHardwareAcceleration();
-  app.commandLine.appendSwitch('no-sandbox');
-  app.commandLine.appendSwitch('disable-gpu');
-  app.commandLine.appendSwitch('disable-gpu-sandbox');
-}
 const express = require('express');
 const QRCode = require('qrcode');
+const multer = require('multer');
 
-const DATA_DIR = IS_SERVER_MODE
-  ? path.join(process.cwd(), 'data')
-  : path.join(app.getPath('userData'), 'learning-modules');
+const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'database.json');
 const { parseUserImportFile } = require('./user-import');
 
@@ -232,6 +217,18 @@ function topicsForTeacher(db, userId) {
     (Array.isArray(t.sharedWith) && t.sharedWith.includes(userId)) ||
     t.permissions?.teacherShared === true // legacy flag
   );
+}
+
+/**
+ * Global Helper for administrative topic and module access.
+ * Returns true if the user is an admin OR the owner OR it is shared with them.
+ */
+function canEditTopic(topic, user) {
+  if (!topic || !user) return false;
+  if (user.role === 'admin') return true;
+  if (topic.ownerId === user.id) return true;
+  if (Array.isArray(topic.sharedWith) && topic.sharedWith.includes(user.id)) return true;
+  return false;
 }
 
 // === ZIP utility functions for H5P import/export ===
@@ -1163,13 +1160,28 @@ function convertH5pToNative(machineName, params, h5pImages = {}) {
       const backgroundFile = backgroundPath ? path.basename(backgroundPath) : '';
       const backgroundImage = backgroundFile && h5pImages[backgroundFile] ? h5pImages[backgroundFile] : '';
 
-      const mappedDropZones = dropZones.map((dz, i) => ({
-        label: stripHtml(dz.label || '') || `Zone ${i + 1}`,
-        x: Math.round(dz.x || 0),
-        y: Math.round(dz.y || 0),
-        width: Math.round(dz.width || 20),
-        height: Math.round(dz.height || 20),
-      }));
+      const mappedDropZones = dropZones.map((dz, i) => {
+        const correctIndices = Array.isArray(dz.correctElements) ? dz.correctElements : [];
+        let correctDraggable = '';
+        if (correctIndices.length > 0) {
+          const firstIdx = parseInt(correctIndices[0], 10);
+          if (!isNaN(firstIdx) && elements[firstIdx]) {
+            const el = elements[firstIdx];
+            const rawText = el.type && el.type.params
+              ? el.type.params.text || (el.type.params.file && el.type.params.file.path) || ''
+              : '';
+            correctDraggable = stripHtml(rawText) || `Element ${firstIdx + 1}`;
+          }
+        }
+        return {
+          label: stripHtml(dz.label || '') || `Zone ${i + 1}`,
+          x: Math.round(dz.x || 0),
+          y: Math.round(dz.y || 0),
+          width: Math.round(dz.width || 20),
+          height: Math.round(dz.height || 20),
+          correctDraggable, // Set this side of the mapping too
+        };
+      });
 
       const draggables = elements
         .map((el, i) => {
@@ -1201,8 +1213,8 @@ function convertH5pToNative(machineName, params, h5pImages = {}) {
       return null; // No native mapping — keep as h5p_native
   }
 }
-
-let mainWindow;
+// --- Global state ---
+const PORT = process.env.PORT || 3000;
 const WEB_PORT = PORT;
 let webServerUrl = null;
 
@@ -1365,7 +1377,6 @@ function startWebServer() {
   });
 
   // === USER IMPORT (Excel/CSV) ===
-  const multer = require('multer');
   const upload = multer({ dest: os.tmpdir() });
 
   /**
@@ -1410,6 +1421,7 @@ function startWebServer() {
         id: 'topic_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
         title: topicTitle,
         description: topicDesc,
+        ownerId: req.authUser.id,
         selected: false,
         createdAt: new Date().toISOString(),
         modules: []
@@ -1422,13 +1434,39 @@ function startWebServer() {
     }
 
     // IDs für neue Module generieren
-    const newModules = importModules.map((m) => ({
-      ...m,
-      id: 'mod_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
-      moduleSelected: true,
-      createdAt: m.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }));
+    const newModules = importModules.map((m) => {
+      const mod = {
+        ...m,
+        id: 'mod_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
+        moduleSelected: true,
+        createdAt: m.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      // Normalize Drag and Drop bidirectional mapping
+      if (mod.type === 'dragAndDrop' && mod.content) {
+        const c = mod.content;
+        const zones = Array.isArray(c.dropZones) ? c.dropZones : [];
+        const drags = Array.isArray(c.draggables) ? c.draggables : [];
+
+        // 1. Sync from draggable to zone
+        drags.forEach(d => {
+          if (d.correctZone && d.text) {
+            const z = zones.find(zz => zz.label === d.correctZone);
+            if (z && !z.correctDraggable) z.correctDraggable = d.text;
+          }
+        });
+
+        // 2. Sync from zone to draggable
+        zones.forEach(z => {
+          if (z.correctDraggable && z.label) {
+            const d = drags.find(dd => dd.text === z.correctDraggable);
+            if (d && !d.correctZone) d.correctZone = z.label;
+          }
+        });
+      }
+      return mod;
+    });
 
     topic.modules.push(...newModules);
     saveDB(db);
@@ -1641,7 +1679,14 @@ function startWebServer() {
     const db = loadDB();
     const topic = (db.topics || []).find(t => t.id === req.params.topicId);
     if (!topic) return res.json([]);
-    res.json((topic.modules || []).filter(m => m.moduleSelected !== false));
+    
+    // Admins and teachers see all modules; students only see selected ones
+    const canSeeAll = req.authUser && (req.authUser.role === 'admin' || req.authUser.role === 'teacher');
+    if (canSeeAll) {
+      res.json(topic.modules || []);
+    } else {
+      res.json((topic.modules || []).filter(m => m.moduleSelected !== false));
+    }
   });
 
   web.get('/api/student-selections/:username', requireAuth(null), (req, res) => {
@@ -1755,6 +1800,121 @@ function startWebServer() {
     res.json({ success: true });
   });
 
+  // ---- MODULE MANAGEMENT ----
+
+  web.post('/api/admin/topics/:topicId/modules', requireAuth(['admin', 'teacher']), express.json({ limit: '1mb' }), (req, res) => {
+    const { topicId } = req.params;
+    const moduleData = req.body;
+    if (!moduleData || !moduleData.id) return res.status(400).json({ error: 'Ungültige Moduldaten' });
+
+    const db = loadDB();
+    const topic = (db.topics || []).find(t => t.id === topicId);
+    if (!topic) return res.status(404).json({ error: 'Thema nicht gefunden' });
+
+    if (!canEditTopic(topic, req.authUser)) {
+      return res.status(403).json({ error: 'Keine Berechtigung' });
+    }
+
+    if (!topic.modules) topic.modules = [];
+    const index = topic.modules.findIndex(m => m.id === moduleData.id);
+
+    if (index !== -1) {
+      // Update existing module
+      topic.modules[index] = {
+        ...topic.modules[index],
+        ...moduleData,
+        updatedAt: new Date().toISOString()
+      };
+    } else {
+      // Add new module
+      topic.modules.push({
+        ...moduleData,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+    }
+
+    saveDB(db);
+    res.json({ success: true, moduleId: moduleData.id });
+  });
+
+  web.patch('/api/admin/topics/:topicId/modules/:moduleId/toggle', requireAuth(['admin', 'teacher']), express.json(), (req, res) => {
+    const db = loadDB();
+    const topic = db.topics.find(t => t.id === req.params.topicId);
+    if (!topic) return res.status(404).json({ error: 'Thema nicht gefunden' });
+    
+    if (!canEditTopic(topic, req.authUser)) {
+      return res.status(403).json({ error: 'Keine Berechtigung' });
+    }
+
+    const mod = (topic.modules || []).find(m => m.id === req.params.moduleId);
+    if (!mod) return res.status(404).json({ error: 'Modul nicht gefunden' });
+
+    mod.moduleSelected = !!req.body.selected;
+    saveDB(db);
+    res.json({ success: true });
+  });
+
+  web.patch('/api/admin/topics/:topicId/modules/bulk-toggle', requireAuth(['admin', 'teacher']), express.json(), (req, res) => {
+    const db = loadDB();
+    const topic = db.topics.find(t => t.id === req.params.topicId);
+    if (!topic) return res.status(404).json({ error: 'Thema nicht gefunden' });
+    
+    if (!canEditTopic(topic, req.authUser)) {
+      return res.status(403).json({ error: 'Keine Berechtigung' });
+    }
+
+    const { moduleIds, selected } = req.body;
+    if (!Array.isArray(moduleIds)) return res.status(400).json({ error: 'moduleIds fehlt' });
+
+    (topic.modules || []).forEach(m => {
+      if (moduleIds.includes(m.id)) {
+        m.moduleSelected = !!selected;
+      }
+    });
+
+    saveDB(db);
+    res.json({ success: true });
+  });
+
+  web.post('/api/admin/topics/:topicId/modules/reorder', requireAuth(['admin', 'teacher']), express.json(), (req, res) => {
+    const db = loadDB();
+    const topic = db.topics.find(t => t.id === req.params.topicId);
+    if (!topic) return res.status(404).json({ error: 'Thema nicht gefunden' });
+
+    if (!canEditTopic(topic, req.authUser)) {
+      return res.status(403).json({ error: 'Keine Berechtigung' });
+    }
+
+    const { moduleIds } = req.body;
+    if (!Array.isArray(moduleIds)) return res.status(400).json({ error: 'moduleIds Array fehlt' });
+
+    const oldModules = topic.modules || [];
+    const byId = Object.fromEntries(oldModules.map(m => [m.id, m]));
+    topic.modules = moduleIds.map(id => byId[id]).filter(Boolean);
+
+    // Append any modules not in the new order (safety net)
+    const idSet = new Set(moduleIds);
+    oldModules.filter(m => !idSet.has(m.id)).forEach(m => topic.modules.push(m));
+
+    saveDB(db);
+    res.json({ success: true });
+  });
+
+  web.delete('/api/admin/topics/:topicId/modules/:moduleId', requireAuth(['admin', 'teacher']), (req, res) => {
+    const db = loadDB();
+    const topic = db.topics.find(t => t.id === req.params.topicId);
+    if (!topic) return res.status(404).json({ error: 'Thema nicht gefunden' });
+
+    if (!canEditTopic(topic, req.authUser)) {
+      return res.status(403).json({ error: 'Keine Berechtigung' });
+    }
+
+    topic.modules = (topic.modules || []).filter(m => m.id !== req.params.moduleId);
+    saveDB(db);
+    res.json({ success: true });
+  });
+
   web.delete('/api/admin/topics/:id', requireAuth(['admin', 'teacher']), (req, res) => {
     const db = loadDB();
     const idx = db.topics.findIndex(t => t.id === req.params.id);
@@ -1862,651 +2022,14 @@ function startWebServer() {
   });
 }
 
-
-
-function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 860,
-    minWidth: 900,
-    minHeight: 600,
-    title: 'LearningModules',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-    icon: path.join(__dirname, '../../assets/icons/icon.png'),
-  });
-
-  mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
-
-  const menu = Menu.buildFromTemplate(getMenuTemplate());
-  Menu.setApplicationMenu(menu);
-}
-
-function getMenuTemplate() {
-  return [
-    {
-      label: 'Datei',
-      submenu: [
-        {
-          label: 'Module importieren...',
-          accelerator: 'CmdOrCtrl+I',
-          click: () => mainWindow.webContents.send('menu-import'),
-        },
-        {
-          label: 'Module exportieren...',
-          accelerator: 'CmdOrCtrl+E',
-          click: () => mainWindow.webContents.send('menu-export'),
-        },
-        { type: 'separator' },
-        {
-          label: 'Beenden',
-          accelerator: 'CmdOrCtrl+Q',
-          click: () => app.quit(),
-        },
-      ],
-    },
-    {
-      label: 'Ansicht',
-      submenu: [
-        { role: 'reload', label: 'Neu laden' },
-        { role: 'toggleDevTools', label: 'Entwicklertools' },
-        { type: 'separator' },
-        { role: 'zoomIn', label: 'Vergrößern' },
-        { role: 'zoomOut', label: 'Verkleinern' },
-        { role: 'resetZoom', label: 'Zoom zurücksetzen' },
-        { type: 'separator' },
-        { role: 'togglefullscreen', label: 'Vollbild' },
-      ],
-    },
-    {
-      label: 'Hilfe',
-      submenu: [
-        {
-          label: 'Über LearningModules',
-          click: () => {
-            dialog.showMessageBox(mainWindow, {
-              type: 'info',
-              title: 'Über LearningModules',
-              message: 'LearningModules v2.0.0',
-              detail: 'Interaktive Lernmodule mit H5P.\nLehrer- & Schüler-System.\nErstellt mit Electron.',
-            });
-          },
-        },
-      ],
-    },
-  ];
-}
-
-// --- IPC: Authentication (Electron mode uses same DB, same users array) ---
-
-ipcMain.handle('verify-admin', (_event, username, password) => {
-  const db = loadDB();
-  const user = findUser(db, username);
-  if (!user || (user.role !== 'admin' && user.role !== 'teacher')) return false;
-  if (!verifyPassword(password, user.passwordHash)) return false;
-  // Return role info so renderer can set correct role
-  return { success: true, role: user.role, username: user.username, displayName: user.displayName || user.username };
-});
-
-ipcMain.handle('get-admin-credentials', () => {
-  const db = loadDB();
-  // Return summary of all teacher/admin users for informational purposes
-  return { username: (db.users.find(u => u.role === 'admin') || {}).username || 'admin' };
-});
-
-ipcMain.handle('update-admin-password', (_event, newPassword) => {
-  const db = loadDB();
-  const admin = db.users.find(u => u.role === 'admin');
-  if (!admin) return { success: false, error: 'Kein Admin gefunden' };
-  admin.passwordHash = hashPassword(newPassword);
-  saveDB(db);
-  return { success: true };
-});
-
-// v2.0 IPC: User management (called by Electron admin UI)
-ipcMain.handle('import-users', async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog({
-    properties: ['openFile'],
-    filters: [{ name: 'Excel/CSV', extensions: ['xlsx', 'csv'] }],
-  });
-  if (canceled || filePaths.length === 0) return { success: false, canceled: true };
-  const filePath = filePaths[0];
-  try {
-    const users = parseUserImportFile(filePath);
-    const db = loadDB();
-    const created = [];
-    const skipped = [];
-    for (const row of users) {
-      const username = (row.login || '').trim();
-      const password = (row.password || '').trim();
-      const role = (row.role || '').trim().toLowerCase();
-      let className = (row.class || '').trim();
-      if (!username || !role) {
-        skipped.push({ username, reason: 'Pflichtfelder fehlen' });
-        continue;
-      }
-      if (db.users.find(u => u.username === username)) {
-        skipped.push({ username, reason: 'Benutzer existiert bereits' });
-        continue;
-      }
-      let classId = null;
-      if (className) {
-        if (!db.classes) db.classes = [];
-        let cls = db.classes.find(c => c.name === className);
-        if (!cls) {
-          cls = { id: makeClassId(), name: className, createdAt: new Date().toISOString() };
-          db.classes.push(cls);
-        }
-        classId = cls.id;
-      }
-      const newUser = {
-        id: makeUserId(),
-        username,
-        passwordHash: hashPassword(password),
-        role,
-        displayName: (row.firstname || '') + (row.lastname ? ' ' + row.lastname : '') || username,
-        classIds: classId ? [classId] : [],
-        accessFilters: { ips: [], browserUsers: [], browserDomains: [] },
-        email: row.email || '',
-      };
-      db.users.push(newUser);
-      created.push(username);
-    }
-    saveDB(db);
-    return { success: true, created, skipped, total: users.length };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('get-all-users', () => {
-  const db = loadDB();
-  return db.users.map(u => ({ id: u.id, username: u.username, displayName: u.displayName, role: u.role, classIds: u.classIds }));
-});
-
-ipcMain.handle('save-user', (_event, userData) => {
-  const db = loadDB();
-  const idx = db.users.findIndex(u => u.id === userData.id);
-  if (idx >= 0) {
-    const existing = db.users[idx];
-    existing.username = userData.username || existing.username;
-    existing.displayName = userData.displayName || existing.displayName;
-    existing.role = userData.role || existing.role;
-    existing.classIds = userData.classIds || existing.classIds || [];
-    existing.accessFilters = userData.accessFilters || existing.accessFilters;
-    if (userData.password !== undefined) existing.passwordHash = hashPassword(userData.password);
-    saveDB(db);
-    return { success: true };
-  } else {
-    if (!userData.username || !userData.role) return { success: false, error: 'username und role sind Pflicht' };
-    const newUser = {
-      id: makeUserId(),
-      username: userData.username,
-      passwordHash: hashPassword(userData.password || ''),
-      role: userData.role,
-      displayName: userData.displayName || userData.username,
-      classIds: userData.classIds || [],
-      accessFilters: userData.accessFilters || { ips: [], browserUsers: [], browserDomains: [] },
-    };
-    db.users.push(newUser);
-    saveDB(db);
-    return { success: true, id: newUser.id };
-  }
-});
-
-ipcMain.handle('delete-user', (_event, userId) => {
-  const db = loadDB();
-  const idx = db.users.findIndex(u => u.id === userId);
-  if (idx < 0) return { success: false, error: 'Benutzer nicht gefunden' };
-
-  const target = db.users[idx];
-  if (target.role === 'admin') {
-    const adminCount = db.users.filter(u => u.role === 'admin').length;
-    if (adminCount <= 1) {
-      return { success: false, error: 'Der letzte Administrator kann nicht gelöscht werden' };
-    }
-  }
-
-  db.users.splice(idx, 1);
-  saveDB(db);
-  return { success: true };
-});
-
-ipcMain.handle('get-all-classes', () => {
-  const db = loadDB();
-  return db.classes || [];
-});
-
-ipcMain.handle('save-class', (_event, classData) => {
-  const db = loadDB();
-  if (!db.classes) db.classes = [];
-  const idx = db.classes.findIndex(c => c.id === classData.id);
-  if (idx >= 0) {
-    db.classes[idx] = { ...db.classes[idx], ...classData };
-  } else {
-    db.classes.push({ id: makeClassId(), ...classData, createdAt: new Date().toISOString() });
-  }
-  saveDB(db);
-  return { success: true };
-});
-
-ipcMain.handle('delete-class', (_event, classId) => {
-  const db = loadDB();
-  if (!db.classes) return { success: false };
-  db.classes = db.classes.filter(c => c.id !== classId);
-  for (const u of db.users) {
-    if (Array.isArray(u.classIds)) u.classIds = u.classIds.filter(cid => cid !== classId);
-  }
-  saveDB(db);
-  return { success: true };
-});
-
-ipcMain.handle('get-app-settings', () => {
-  const db = loadDB();
-  return db.settings || {};
-});
-
-ipcMain.handle('save-app-settings', (_event, settings) => {
-  const db = loadDB();
-  Object.assign(db.settings, settings);
-  saveDB(db);
-  return { success: true };
-});
-
-// --- IPC: Topics CRUD ---
-
-ipcMain.handle('get-topics', () => {
-  const db = loadDB();
-  return db.topics;
-});
-
-ipcMain.handle('save-topic', (_event, topicData) => {
-  const db = loadDB();
-  const idx = db.topics.findIndex((t) => t.id === topicData.id);
-  if (idx >= 0) {
-    // Preserve modules when updating topic metadata
-    topicData.modules = topicData.modules || db.topics[idx].modules || [];
-    db.topics[idx] = topicData;
-  } else {
-    topicData.modules = topicData.modules || [];
-    db.topics.push(topicData);
-  }
-  saveDB(db);
-  return { success: true };
-});
-
-ipcMain.handle('delete-topic', (_event, topicId) => {
-  const db = loadDB();
-  db.topics = db.topics.filter((t) => t.id !== topicId);
-  saveDB(db);
-  return { success: true };
-});
-
-ipcMain.handle('toggle-topic-selection', (_event, topicId, selected) => {
-  const db = loadDB();
-  const topic = db.topics.find((t) => t.id === topicId);
-  if (topic) {
-    topic.selected = selected;
-    saveDB(db);
-  }
-  return { success: true };
-});
-
-ipcMain.handle('set-topic-sharing', (_event, topicId, sharedWith) => {
-  const db = loadDB();
-  const topic = db.topics.find((t) => t.id === topicId);
-  if (!topic) return { success: false, error: 'Thema nicht gefunden' };
-  topic.sharedWith = Array.isArray(sharedWith) ? sharedWith : [];
-  saveDB(db);
-  return { success: true };
-});
-
-ipcMain.handle('get-exam-mode', () => {
-  const db = loadDB();
-  return { enabled: !!db.examMode };
-});
-
-ipcMain.handle('set-exam-mode', (_event, enabled) => {
-  const db = loadDB();
-  db.examMode = !!enabled;
-  saveDB(db);
-  return { success: true, enabled: db.examMode };
-});
-
-// --- IPC: Modules CRUD (within a topic) ---
-
-ipcMain.handle('get-topic-modules', (_event, topicId) => {
-  const db = loadDB();
-  const topic = db.topics.find((t) => t.id === topicId);
-  return topic ? topic.modules || [] : [];
-});
-
-ipcMain.handle('save-module', (_event, topicId, moduleData) => {
-  const db = loadDB();
-  const topic = db.topics.find((t) => t.id === topicId);
-  if (!topic) return { success: false, error: 'Thema nicht gefunden' };
-  if (!topic.modules) topic.modules = [];
-  const idx = topic.modules.findIndex((m) => m.id === moduleData.id);
-  if (idx >= 0) {
-    const existing = topic.modules[idx] || {};
-    const merged = { ...existing, ...moduleData };
-    if (existing.h5pSource && moduleData.type && moduleData.type !== existing.type && !moduleData.h5pSource) {
-      delete merged.h5pSource;
-    }
-    topic.modules[idx] = merged;
-  } else {
-    topic.modules.push(moduleData);
-  }
-  saveDB(db);
-  return { success: true };
-});
-
-ipcMain.handle('delete-module', (_event, topicId, moduleId) => {
-  const db = loadDB();
-  const topic = db.topics.find((t) => t.id === topicId);
-  if (!topic) return { success: false };
-  topic.modules = (topic.modules || []).filter((m) => m.id !== moduleId);
-  saveDB(db);
-  return { success: true };
-});
-
-ipcMain.handle('toggle-module-selection', (_event, topicId, moduleId, selected) => {
-  const db = loadDB();
-  const topic = db.topics.find((t) => t.id === topicId);
-  if (!topic) return { success: false };
-  const mod = (topic.modules || []).find((m) => m.id === moduleId);
-  if (!mod) return { success: false };
-  mod.moduleSelected = selected;
-  saveDB(db);
-  return { success: true };
-});
-
-ipcMain.handle('reorder-modules', (_event, topicId, moduleIds) => {
-  const db = loadDB();
-  const topic = db.topics.find((t) => t.id === topicId);
-  if (!topic) return { success: false };
-  const oldModules = topic.modules || [];
-  const byId = Object.fromEntries(oldModules.map((m) => [m.id, m]));
-  topic.modules = moduleIds.map((id) => byId[id]).filter(Boolean);
-  // Append any modules not in the new order (safety net)
-  const idSet = new Set(moduleIds);
-  oldModules.filter((m) => !idSet.has(m.id)).forEach((m) => topic.modules.push(m));
-  saveDB(db);
-  return { success: true };
-});
-
-ipcMain.handle('transfer-modules', (_event, sourceTopicId, targetTopicId, moduleIds, mode) => {
-  const db = loadDB();
-  const sourceTopic = db.topics.find((t) => t.id === sourceTopicId);
-  const targetTopic = db.topics.find((t) => t.id === targetTopicId);
-  if (!sourceTopic || !targetTopic) return { success: false, error: 'Thema nicht gefunden' };
-
-  if (!sourceTopic.modules) sourceTopic.modules = [];
-  if (!targetTopic.modules) targetTopic.modules = [];
-
-  const modulesToTransfer = sourceTopic.modules.filter((m) => moduleIds.includes(m.id));
-  if (modulesToTransfer.length === 0) return { success: false, error: 'Keine Module ausgewählt' };
-
-  if (mode === 'move') {
-    for (const mod of modulesToTransfer) {
-      targetTopic.modules.push(mod);
-    }
-    sourceTopic.modules = sourceTopic.modules.filter((m) => !moduleIds.includes(m.id));
-  } else if (mode === 'copy') {
-    for (const mod of modulesToTransfer) {
-      const cloned = JSON.parse(JSON.stringify(mod));
-      cloned.id = 'mod_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
-      cloned.title = `${cloned.title} (Kopie)`;
-      targetTopic.modules.push(cloned);
-    }
-  } else {
-    return { success: false, error: 'Ungültiger Modus' };
-  }
-
-  saveDB(db);
-  return { success: true, count: modulesToTransfer.length };
-});
-
-// --- IPC: Export/Import (per topic) ---
-
-ipcMain.handle('export-topic', async (_event, topicId) => {
-  const db = loadDB();
-  const topic = db.topics.find((t) => t.id === topicId);
-  if (!topic) return { success: false, error: 'Thema nicht gefunden' };
-
-  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-    title: 'Lernthema exportieren',
-    defaultPath: `${topic.title.replace(/[^a-zA-Z0-9äöüÄÖÜß_-]/g, '_')}.json`,
-    filters: [{ name: 'JSON-Dateien', extensions: ['json'] }],
-  });
-  if (canceled || !filePath) return { success: false };
-
-  const allModules = topic.modules || [];
-  const selectedModules = allModules.filter((m) => m.moduleSelected !== false);
-  const exportData = {
-    exportVersion: '2.0',
-    exportDate: new Date().toISOString(),
-    topic: {
-      title: topic.title,
-      description: topic.description,
-      modules: selectedModules,
-    },
-  };
-  fs.writeFileSync(filePath, JSON.stringify(exportData, null, 2), 'utf-8');
-  return { success: true, filePath };
-});
-
-ipcMain.handle('import-topic', async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-    title: 'Lernthema importieren',
-    filters: [{ name: 'JSON-Dateien', extensions: ['json'] }],
-    properties: ['openFile'],
-  });
-  if (canceled || filePaths.length === 0) return { success: false };
-
-  const raw = fs.readFileSync(filePaths[0], 'utf-8');
-  let importData;
-  try {
-    importData = JSON.parse(raw);
-  } catch {
-    return { success: false, error: 'Ungültiges JSON-Format' };
-  }
-
-  const db = loadDB();
-
-  // Support v2.0 format (topic) and v1.0 format (flat modules)
-  if (importData.topic) {
-    const newTopic = {
-      id: 'topic_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
-      title: importData.topic.title || 'Importiertes Thema',
-      description: importData.topic.description || '',
-      selected: false,
-      createdAt: new Date().toISOString(),
-      modules: importData.topic.modules || [],
-    };
-    db.topics.push(newTopic);
-    saveDB(db);
-    return { success: true, importedCount: (newTopic.modules || []).length, topicTitle: newTopic.title };
-  } else if (importData.modules && Array.isArray(importData.modules)) {
-    // Legacy v1.0 format
-    const newTopic = {
-      id: 'topic_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
-      title: 'Importierte Module',
-      description: 'Importiert aus einer v1.0 Exportdatei',
-      selected: false,
-      createdAt: new Date().toISOString(),
-      modules: importData.modules,
-    };
-    db.topics.push(newTopic);
-    saveDB(db);
-    return { success: true, importedCount: importData.modules.length, topicTitle: newTopic.title };
-  }
-
-  return { success: false, error: 'Ungültiges Export-Format' };
-});
-
-ipcMain.handle('import-modules-to-topic', async (_event, topicId) => {
-  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-    title: 'Module importieren',
-    filters: [{ name: 'JSON-Dateien', extensions: ['json'] }],
-    properties: ['openFile'],
-  });
-  if (canceled || filePaths.length === 0) return { success: false };
-
-  const raw = fs.readFileSync(filePaths[0], 'utf-8');
-  let importData;
-  try {
-    importData = JSON.parse(raw);
-  } catch {
-    return { success: false, error: 'Ungültiges JSON-Format' };
-  }
-
-  let importModules = [];
-  if (importData.topic && importData.topic.modules) {
-    importModules = importData.topic.modules;
-  } else if (importData.modules && Array.isArray(importData.modules)) {
-    importModules = importData.modules;
-  }
-  if (importModules.length === 0) {
-    return { success: false, error: 'Keine Module in der Datei gefunden' };
-  }
-
-  return {
-    success: true,
-    modules: importModules.map((m) => ({
-      id: m.id,
-      title: m.title,
-      type: m.type,
-      description: m.description || '',
-    })),
-    _fullModules: importModules,
-  };
-});
-
-ipcMain.handle('confirm-import-modules', (_event, topicId, modules) => {
-  const db = loadDB();
-  const topic = db.topics.find((t) => t.id === topicId);
-  if (!topic) return { success: false, error: 'Thema nicht gefunden' };
-  if (!topic.modules) topic.modules = [];
-
-  for (const mod of modules) {
-    mod.id = 'mod_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
-    mod.moduleSelected = true;
-    topic.modules.push(mod);
-  }
-  saveDB(db);
-  return { success: true, importedCount: modules.length };
-});
-
-// --- IPC: Student topic selection ---
-
-ipcMain.handle('get-selected-topics', () => {
-  const db = loadDB();
-  // Return only topics the teacher has enabled (selected = true)
-  return db.topics.filter((t) => t.selected);
-});
-
-ipcMain.handle('get-student-selections', (_event, username) => {
-  const db = loadDB();
-  return db.studentSelectedTopics[username] || [];
-});
-
-ipcMain.handle('save-student-selections', (_event, username, topicIds) => {
-  const db = loadDB();
-  db.studentSelectedTopics[username] = topicIds;
-  saveDB(db);
-  return { success: true };
-});
-
-// --- IPC: Quiz Results ---
-
-ipcMain.handle('save-quiz-result', (_event, resultData) => {
-  const db = loadDB();
-  resultData.id = db.nextResultId++;
-  resultData.timestamp = new Date().toISOString();
-  
-  resultData.ipAddress = getPreferredIP() || 'localhost';
-  try {
-    resultData.systemUsername = os.userInfo().username;
-  } catch (e) {
-    resultData.systemUsername = 'Unbekannt';
-  }
-
-  db.results.push(resultData);
-  saveDB(db);
-  return { success: true, id: resultData.id };
-});
-
-ipcMain.handle('get-quiz-results', () => {
-  const db = loadDB();
-  return db.results.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-});
-
-ipcMain.handle('delete-quiz-result', (_event, resultId) => {
-  const db = loadDB();
-  db.results = db.results.filter((r) => r.id !== resultId);
-  saveDB(db);
-  return { success: true };
-});
-
-ipcMain.handle('delete-all-quiz-results', () => {
-  const db = loadDB();
-  db.results = [];
-  saveDB(db);
-  return { success: true };
-});
-
-ipcMain.handle('get-h5p-content-path', () => {
-  return path.join(__dirname, '../../h5p-content');
-});
-
-ipcMain.handle('select-image', async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-    title: 'Bild auswählen',
-    filters: [{ name: 'Bilder', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'] }],
-    properties: ['openFile'],
-  });
-  if (canceled || filePaths.length === 0) return { success: false };
-  const filePath = filePaths[0];
-  const ext = path.extname(filePath).toLowerCase().replace('.', '');
-  const mimeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp', svg: 'image/svg+xml' };
-  const mime = mimeMap[ext] || 'image/png';
-  const data = fs.readFileSync(filePath);
-  const base64 = data.toString('base64');
-  return { success: true, dataUrl: `data:${mime};base64,${base64}` };
-});
-
-ipcMain.handle('select-audio', async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-    title: 'Audio auswählen',
-    filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'ogg', 'aac', 'm4a', 'webm'] }],
-    properties: ['openFile'],
-  });
-  if (canceled || filePaths.length === 0) return { success: false };
-  const filePath = filePaths[0];
-  const ext = path.extname(filePath).toLowerCase().replace('.', '');
-  const mimeMap = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', aac: 'audio/aac', m4a: 'audio/mp4', webm: 'audio/webm' };
-  const mime = mimeMap[ext] || 'audio/mpeg';
-  const data = fs.readFileSync(filePath);
-  const base64 = data.toString('base64');
-  return { success: true, dataUrl: `data:${mime};base64,${base64}` };
-});
-
-ipcMain.on('focus-window', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.focus();
-    mainWindow.webContents.focus();
-  }
-});
-
-ipcMain.handle('get-web-server-url', () => {
-  return webServerUrl;
-});
-
-// --- H5P Import (shared logic — used by Electron IPC and web upload) ---
+// --- Start Server ---
+console.log('--- LearningModules Web Server ---');
+console.log(`Data directory: ${DATA_DIR}`);
+startWebServer();
+
+// ============================================================
+// === H5P PROCESSING LOGIC (Restored) ========================
+// ============================================================
 
 function processH5pBuffer(buffer, fileName, importMode = 'native') {
   let entries;
@@ -2609,36 +2132,6 @@ function processH5pBuffer(buffer, fileName, importMode = 'native') {
   return { success: true, topic, importMode: 'native' };
 }
 
-ipcMain.handle('import-h5p', async (_event, options = {}) => {
-  const importMode = options && options.importMode === 'raw' ? 'raw' : 'native';
-  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-    title: 'H5P-Datei importieren',
-    filters: [{ name: 'H5P-Dateien', extensions: ['h5p'] }],
-    properties: ['openFile'],
-  });
-  if (canceled || filePaths.length === 0) return { success: false };
-
-  let buffer;
-  try { buffer = fs.readFileSync(filePaths[0]); }
-  catch (e) { return { success: false, error: 'Datei konnte nicht gelesen werden: ' + e.message }; }
-
-  const result = processH5pBuffer(buffer, path.basename(filePaths[0]), importMode);
-  if (!result.success) return result;
-
-  const db = loadDB();
-  // Assign ownerId if missing (for Electron mode: use first admin)
-  const firstAdmin = db.users.find(u => u.role === 'admin');
-  result.topic.ownerId = firstAdmin ? firstAdmin.id : null;
-  db.topics.push(result.topic);
-  saveDB(db);
-  return { success: true, topicTitle: result.topic.title, importedCount: result.topic.modules.length, importMode: result.importMode };
-});
-
-// --- IPC: H5P Export ---
-
-/**
- * Gemeinsame Funktion zur Generierung eines H5P-Puffers für ein Thema (QuestionSet).
- */
 function generateH5pBuffer(topicId) {
   const db = loadDB();
   const topic = db.topics.find((t) => t.id === topicId);
@@ -2712,152 +2205,4 @@ function generateH5pBuffer(topicId) {
   } catch (e) {
     return { success: false, error: e.message };
   }
-}
-
-ipcMain.handle('export-topic-as-h5p', async (_event, topicId) => {
-  const result = generateH5pBuffer(topicId);
-  if (!result.success) return result;
-
-  const safeName = (result.topicTitle || 'export').replace(/[^\w\säöüÄÖÜß-]/g, '_');
-  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-    title: 'Thema als H5P exportieren',
-    defaultPath: `${safeName}.h5p`,
-    filters: [{ name: 'H5P-Dateien', extensions: ['h5p'] }],
-  });
-  if (canceled || !filePath) return { success: false };
-
-  try {
-    fs.writeFileSync(filePath, result.buffer);
-    return { success: true, filePath, exportedMode: result.exportedMode };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-// --- IPC: Export selected modules individually as H5P ---
-
-ipcMain.handle('export-selected-modules-as-h5p', async (_event, topicId) => {
-  const db = loadDB();
-  const topic = db.topics.find((t) => t.id === topicId);
-  if (!topic) return { success: false, error: 'Thema nicht gefunden' };
-
-  if (topic.h5pImportMode === 'raw') {
-    return { success: false, error: 'RAW H5P-Projekte können nicht als einzelne Module exportiert werden.' };
-  }
-
-  const selectedModules = (topic.modules || []).filter((m) => m.moduleSelected !== false);
-  if (selectedModules.length === 0) {
-    return { success: false, error: 'Keine aktiven Module zum Exportieren vorhanden.' };
-  }
-
-  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-    title: `H5P-Export: ${selectedModules.length} Modul(e) exportieren`,
-    properties: ['openDirectory', 'createDirectory'],
-    buttonLabel: 'Ordner wählen',
-  });
-  if (canceled || !filePaths || !filePaths[0]) return { success: false };
-
-  const exportDir = filePaths[0];
-  let exported = 0;
-  const errors = [];
-  const usedNames = new Set();
-
-  for (const mod of selectedModules) {
-    try {
-      const converted = convertNativeModuleToH5pQuestion(mod, topic.h5pImages || {});
-      if (!converted) {
-        errors.push(`"${mod.title}": Konvertierung fehlgeschlagen`);
-        continue;
-      }
-
-      // Some types (e.g. trueFalse) return multiple questions
-      const questionsToExport = converted.questions
-        ? converted.questions
-        : [converted.question];
-      const { addedImages } = converted;
-
-      for (const question of questionsToExport) {
-        const libraryStr = question.library || 'H5P.AdvancedText 1.1';
-        const parts = libraryStr.split(' ');
-        const machineName = parts[0];
-        const versionStr = parts[1] || '1.0';
-        const [majorStr, minorStr] = versionStr.split('.');
-        const majorVersion = parseInt(majorStr, 10) || 1;
-        const minorVersion = parseInt(minorStr, 10) || 0;
-
-        const exportTitle = (question.metadata && question.metadata.title) || mod.title;
-
-        const h5pJson = {
-          embedTypes: ['iframe'],
-          language: 'de',
-          title: exportTitle,
-          mainLibrary: machineName,
-          license: 'U',
-          defaultLanguage: 'de',
-          preloadedDependencies: [{ machineName, majorVersion, minorVersion }],
-          extraTitle: exportTitle,
-        };
-
-        const contentJson = question.params || {};
-
-        // Unique, safe file name
-        let baseName = (exportTitle || 'modul').replace(/[^\w\säöüÄÖÜß-]/g, '_').trim() || 'modul';
-        let fileName = `${baseName}.h5p`;
-        let counter = 1;
-        while (usedNames.has(fileName.toLowerCase())) {
-          fileName = `${baseName}_${counter++}.h5p`;
-        }
-        usedNames.add(fileName.toLowerCase());
-
-        const filePath = path.join(exportDir, fileName);
-        const zipFiles = {
-          'h5p.json':              Buffer.from(JSON.stringify(h5pJson,    null, 2), 'utf8'),
-          'content/content.json':  Buffer.from(JSON.stringify(contentJson, null, 2), 'utf8'),
-        };
-
-        const allImages = { ...(topic.h5pImages || {}), ...(addedImages || {}) };
-        for (const [imgName, dataUrl] of Object.entries(allImages)) {
-          if (!dataUrl) continue;
-          const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
-          if (b64) zipFiles[`content/images/${imgName}`] = Buffer.from(b64, 'base64');
-        }
-
-        fs.writeFileSync(filePath, createZip(zipFiles));
-        exported++;
-      }
-    } catch (e) {
-      errors.push(`"${mod.title}": ${e.message}`);
-    }
-  }
-
-  return {
-    success: exported > 0,
-    exported,
-    total: selectedModules.length,
-    exportDir,
-    errors: errors.length > 0 ? errors : undefined,
-    error: exported === 0 ? (errors[0] || 'Keine Module exportiert.') : undefined,
-  };
-});
-
-// --- App lifecycle ---
-
-if (IS_SERVER_MODE) {
-  console.log('--- LearningModules SERVER MODE ---');
-  console.log('Running as standalone web server for students.');
-  console.log(`Data directory: ${DATA_DIR}`);
-  startWebServer();
-} else {
-  app.whenReady().then(() => {
-    createWindow();
-    startWebServer();
-  });
-
-  app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit();
-  });
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
 }

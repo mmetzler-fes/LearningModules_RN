@@ -663,15 +663,23 @@ class ContentEditorManager {
   renderDragAndDropEditor(typeDef, data) {
     this.dndState = {
       backgroundImage: data.backgroundImage || '',
-      dropZones: (data.dropZones || []).map((z, i) => ({
-        id: i,
-        label: z.label || '',
-        correctDraggable: z.correctDraggable || '',
-        x: z.x ?? 10,
-        y: z.y ?? 10,
-        width: z.width ?? 20,
-        height: z.height ?? 15,
-      })),
+      dropZones: (data.dropZones || []).map((z, i) => {
+        let correctDraggable = z.correctDraggable || '';
+        // If missing, try to infer from draggables for a robust editor UI
+        if (!correctDraggable && z.label) {
+          const matchingDrag = (data.draggables || []).find(d => d.correctZone === z.label);
+          if (matchingDrag) correctDraggable = matchingDrag.text;
+        }
+        return {
+          id: i,
+          label: z.label || '',
+          correctDraggable,
+          x: z.x ?? 10,
+          y: z.y ?? 10,
+          width: z.width ?? 20,
+          height: z.height ?? 15,
+        };
+      }),
       draggables: (data.draggables || []).map((d) => ({
         text: d.text || '',
         correctZone: d.correctZone || '',

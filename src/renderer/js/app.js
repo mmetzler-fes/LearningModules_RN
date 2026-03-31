@@ -5,8 +5,7 @@
  * Supports: Electron (full) + Browser/Server mode (all features via REST API)
  */
 
-// --- Browser vs Electron detection ---
-const isElectron = !!(window.api && window.api.getTopics);
+// --- Web-only mode ---
 
 // --- Auth token storage (browser mode uses localStorage) ---
 const authStore = {
@@ -106,10 +105,22 @@ const browserApi = {
 
   // Module CRUD (via topic save)
   getTopicModules: (topicId) => authStore.authFetch(`/api/topics/${encodeURIComponent(topicId)}/modules`),
-  saveModule: () => Promise.resolve({ success: true }),   // handled client-side then topic save
-  deleteModule: () => Promise.resolve({ success: true }), // handled client-side then topic save
-  toggleModuleSelection: () => Promise.resolve({ success: true }),
-  reorderModules: () => Promise.resolve({ success: true }),
+  saveModule: (topicId, moduleData) =>
+    authStore.authFetch(`/api/admin/topics/${encodeURIComponent(topicId)}/modules`, {
+      method: 'POST', body: JSON.stringify(moduleData)
+    }),
+  deleteModule: (topicId, moduleId) => authStore.authFetch(`/api/admin/topics/${encodeURIComponent(topicId)}/modules/${encodeURIComponent(moduleId)}`, {
+    method: 'DELETE'
+  }),
+  toggleModuleSelection: (topicId, moduleId, selected) => authStore.authFetch(`/api/admin/topics/${encodeURIComponent(topicId)}/modules/${encodeURIComponent(moduleId)}/toggle`, {
+    method: 'PATCH', body: JSON.stringify({ selected })
+  }),
+  bulkToggleModules: (topicId, moduleIds, selected) => authStore.authFetch(`/api/admin/topics/${encodeURIComponent(topicId)}/modules/bulk-toggle`, {
+    method: 'PATCH', body: JSON.stringify({ moduleIds, selected })
+  }),
+  reorderModules: (topicId, moduleIds) => authStore.authFetch(`/api/admin/topics/${encodeURIComponent(topicId)}/modules/reorder`, {
+    method: 'POST', body: JSON.stringify({ moduleIds })
+  }),
   transferModules: () => Promise.resolve({ success: false, error: 'Im Browser-Modus nicht verfügbar' }),
 
   // Export/Import (topic JSON)
@@ -250,7 +261,7 @@ const browserApi = {
   getWebServerUrl: () => Promise.resolve(window.location.origin),
 };
 
-const appApi = isElectron ? window.api : browserApi;
+const appApi = browserApi;
 
 // --- State ---
 let currentUser = null; // { name, role: 'admin'|'teacher'|'student', id, username }
@@ -274,21 +285,10 @@ const userImportResult = document.getElementById('userImportResult');
 // === Nutzerimport: Dialog-Logik ===
 if (btnImportUsers) {
   btnImportUsers.addEventListener('click', async () => {
-    if (isElectron) {
-      // In Electron: native dialog directly
-      const res = await appApi.importUsers();
-      if (res && res.success) {
-        showToast(`${res.created.length} Nutzer importiert.`, 'success');
-        await refreshAdminUsers();
-      } else if (res && res.error) {
-        showToast('Fehler: ' + res.error, 'error');
-      }
-    } else {
-      // In Browser: show overlay
-      userImportOverlay.classList.remove('hidden');
-      userImportResult.textContent = '';
-      userImportFile.value = '';
-    }
+    // Show overlay
+    userImportOverlay.classList.remove('hidden');
+    userImportResult.textContent = '';
+    userImportFile.value = '';
   });
 }
 if (btnCancelUserImport) {
@@ -666,24 +666,22 @@ function initModuleDescriptionEditor() {
 
 async function initLoginScreen() {
   // In browser mode: check if empty student passwords are allowed and if teacher login should be shown
-  if (!isElectron) {
-    try {
-      const settings = await fetch('/api/auth/settings').then(r => r.json());
-      
-      // Update student password field visibility
-      const studentPasswordField = document.getElementById('loginPassword');
-      if (studentPasswordField) {
-        studentPasswordField.required = !settings.allowEmptyStudentPassword;
-        document.getElementById('loginPasswordGroup').classList.toggle('hidden', settings.allowEmptyStudentPassword);
-      }
+  try {
+    const settings = await fetch('/api/auth/settings').then(r => r.json());
+    
+    // Update student password field visibility
+    const studentPasswordField = document.getElementById('loginPassword');
+    if (studentPasswordField) {
+      studentPasswordField.required = !settings.allowEmptyStudentPassword;
+      document.getElementById('loginPasswordGroup').classList.toggle('hidden', settings.allowEmptyStudentPassword);
+    }
 
-      // Update teacher login button visibility based on server filters
-      const adminToggle = document.getElementById('btnShowAdminLogin');
-      if (adminToggle) {
-        adminToggle.style.display = settings.showTeacherLogin ? '' : 'none';
-      }
-    } catch (_) {}
-  }
+    // Update teacher login button visibility based on server filters
+    const adminToggle = document.getElementById('btnShowAdminLogin');
+    if (adminToggle) {
+      adminToggle.style.display = settings.showTeacherLogin ? '' : 'none';
+    }
+  } catch (_) {}
 }
 
 loginForm.addEventListener('submit', async (e) => {
@@ -693,32 +691,26 @@ loginForm.addEventListener('submit', async (e) => {
   const password = passwordInput ? passwordInput.value : '';
   if (!name) return;
 
-  if (!isElectron) {
-    // Browser mode: authenticate via API
-    const loginError = document.getElementById('studentLoginError');
-    try {
-      const res = await browserApi.login(name, password);
-      if (res.token && res.role === 'student') {
-        authStore.setToken(res.token);
-        currentUser = { name: res.displayName || res.username, role: 'student', id: res.id, username: res.username };
-        if (loginError) loginError.classList.add('hidden');
-        enterApp();
-      } else if (res.token && (res.role === 'admin' || res.role === 'teacher')) {
-        // Teacher/admin tried the student form
-        authStore.setToken(res.token);
-        currentUser = { name: res.displayName || res.username, role: res.role, id: res.id, username: res.username };
-        if (loginError) loginError.classList.add('hidden');
-        enterApp();
-      } else {
-        if (loginError) { loginError.textContent = res.error || 'Anmeldung fehlgeschlagen'; loginError.classList.remove('hidden'); }
-      }
-    } catch (_) {
-      if (loginError) { loginError.textContent = 'Server nicht erreichbar'; loginError.classList.remove('hidden'); }
+  // Browser mode: authenticate via API
+  const loginError = document.getElementById('studentLoginError');
+  try {
+    const res = await browserApi.login(name, password);
+    if (res.token && res.role === 'student') {
+      authStore.setToken(res.token);
+      currentUser = { name: res.displayName || res.username, role: 'student', id: res.id, username: res.username };
+      if (loginError) loginError.classList.add('hidden');
+      enterApp();
+    } else if (res.token && (res.role === 'admin' || res.role === 'teacher')) {
+      // Teacher/admin tried the student form
+      authStore.setToken(res.token);
+      currentUser = { name: res.displayName || res.username, role: res.role, id: res.id, username: res.username };
+      if (loginError) loginError.classList.add('hidden');
+      enterApp();
+    } else {
+      if (loginError) { loginError.textContent = res.error || 'Anmeldung fehlgeschlagen'; loginError.classList.remove('hidden'); }
     }
-  } else {
-    // Electron mode: student login is name-only (no password check for legacy compat)
-    currentUser = { name, role: 'student', username: name };
-    enterApp();
+  } catch (_) {
+    if (loginError) { loginError.textContent = 'Server nicht erreichbar'; loginError.classList.remove('hidden'); }
   }
 });
 
@@ -740,34 +732,21 @@ adminLoginForm.addEventListener('submit', async (e) => {
   const pass = adminPassword.value;
   if (!user || !pass) return;
 
-  if (!isElectron) {
-    // Browser mode: login via API, get role from response
-    try {
-      const res = await browserApi.login(user, pass);
-      if (res.token && (res.role === 'admin' || res.role === 'teacher')) {
-        authStore.setToken(res.token);
-        currentUser = { name: res.displayName || res.username, role: res.role, id: res.id, username: res.username };
-        adminLoginError.classList.add('hidden');
-        enterApp();
-      } else {
-        adminLoginError.textContent = res.error || 'Falsche Anmeldedaten';
-        adminLoginError.classList.remove('hidden');
-      }
-    } catch (_) {
-      adminLoginError.textContent = 'Server nicht erreichbar';
-      adminLoginError.classList.remove('hidden');
-    }
-  } else {
-    // Electron mode: use IPC verify-admin (which now checks hashed password)
-    const valid = await appApi.verifyAdmin(user, pass);
-    if (valid) {
-      // valid is now an object { success, role, username, displayName } from IPC
-      currentUser = { name: valid.displayName || user, role: valid.role || 'teacher', username: user };
+  // Browser mode: login via API, get role from response
+  try {
+    const res = await browserApi.login(user, pass);
+    if (res.token && (res.role === 'admin' || res.role === 'teacher')) {
+      authStore.setToken(res.token);
+      currentUser = { name: res.displayName || res.username, role: res.role, id: res.id, username: res.username };
       adminLoginError.classList.add('hidden');
       enterApp();
     } else {
+      adminLoginError.textContent = res.error || 'Falsche Anmeldedaten';
       adminLoginError.classList.remove('hidden');
     }
+  } catch (_) {
+    adminLoginError.textContent = 'Server nicht erreichbar';
+    adminLoginError.classList.remove('hidden');
   }
 });
 
@@ -775,7 +754,7 @@ function showLoginScreen() {
   currentUser = null;
   quizState = null;
   currentTopicId = null;
-  if (!isElectron) authStore.setToken(null);
+  authStore.setToken(null);
   views.forEach(v => v.classList.remove('active'));
   quizPlayerArea.classList.add('hidden');
   quizResultArea.classList.add('hidden');
@@ -1364,23 +1343,15 @@ async function refreshModulesList() {
     deselectAllBtn.title = 'Alle Module deaktivieren';
 
     selectAllBtn.addEventListener('click', async () => {
-      for (const mod of filtered) {
-        if (mod.moduleSelected === false) {
-          await appApi.toggleModuleSelection(currentTopicId, mod.id, true);
-          mod.moduleSelected = true;
-        }
-      }
+      const moduleIds = filtered.map(m => m.id);
+      await appApi.bulkToggleModules(currentTopicId, moduleIds, true);
       showToast('Alle Module aktiviert', 'info');
       refreshModulesList();
     });
 
     deselectAllBtn.addEventListener('click', async () => {
-      for (const mod of filtered) {
-        if (mod.moduleSelected !== false) {
-          await appApi.toggleModuleSelection(currentTopicId, mod.id, false);
-          mod.moduleSelected = false;
-        }
-      }
+      const moduleIds = filtered.map(m => m.id);
+      await appApi.bulkToggleModules(currentTopicId, moduleIds, false);
       showToast('Alle Module deaktiviert', 'info');
       refreshModulesList();
     });
@@ -1515,36 +1486,8 @@ btnImportModules.addEventListener('click', async () => {
   const result = await appApi.importModulesToTopic(currentTopicId);
   if (!result || !result.success) return;
 
-  // Im Browser-Modus (REST API) wurden die Module bereits direkt gespeichert
-  if (!isElectron) {
-    showToast(`${result.importedCount} Modul(e) importiert.`, 'success');
-    await loadTopicModules(currentTopicId);
-    return;
-  }
-
-  // Electron-Modus: Zeige Vorschau-Modal
-  pendingImportModules = result._fullModules || [];
-  const modules = result.modules || [];
-
-  importModulesList.innerHTML = '';
-  for (const mod of modules) {
-    const typeInfo = H5P_TYPES[mod.type] || {};
-    const div = document.createElement('div');
-    div.className = 'import-module-item';
-    div.innerHTML = `
-      <input type="checkbox" class="module-select-checkbox" data-mod-id="${mod.id}" checked />
-      <label>
-        <span class="import-module-title">${typeInfo.icon || '📦'} ${mod.title || 'Ohne Titel'}</span>
-        <span class="import-module-type">${typeInfo.name || mod.type || 'Unbekannt'}</span>
-      </label>
-    `;
-    const cb = div.querySelector('input');
-    div.addEventListener('click', (e) => {
-      if (e.target !== cb) cb.checked = !cb.checked;
-    });
-    importModulesList.appendChild(div);
-  }
-  importModulesOverlay.classList.remove('hidden');
+  showToast(`${result.importedCount} Modul(e) importiert.`, 'success');
+  await loadTopicModules(currentTopicId);
 });
 
 importModulesBtnCancel.addEventListener('click', () => {
@@ -2042,6 +1985,7 @@ function renderQuizModule() {
   if (btnQuizPrev) {
     const isExam = examModeEnabled && currentUser && currentUser.role === 'student';
     btnQuizPrev.style.display = (!isExam && currentIndex > 0) ? 'inline-block' : 'none';
+    btnQuizPrev.textContent = t('quiz.prev');
   }
 }
 
@@ -3429,31 +3373,39 @@ function createTypePreview(type, content, options = {}) {
             let correct = 0;
             let totalScored = 0;
             zoneEls.forEach((z, idx) => {
-              const expected = zones.find(zz => zz.label === z.dataset.zone)?.correctDraggable || '';
+              const zoneData = zones.find(zz => zz.label === z.dataset.zone);
+              const expected = zoneData?.correctDraggable || '';
               const items = z.querySelectorAll('.dnd-player-drag.placed');
               const defaultColor = colors[idx % colors.length];
               
-              if (expected) {
-                totalScored++;
-                let hasCorrect = false;
-                let anyWrong = false;
-                for (const item of items) {
-                  if (item.textContent === expected) hasCorrect = true;
-                  else anyWrong = true;
-                }
-                
-                if (hasCorrect && !anyWrong) {
-                  z.style.borderColor = 'green';
-                  correct++;
-                } else {
-                  z.style.borderColor = 'red';
-                }
+              // We consider it correct if AT LEAST ONE element matches the expected text
+              // OR if the items themselves have this zone as their 'correctZone'.
+              let hasCorrect = false;
+              let anyWrong = false;
+
+              if (items.length === 0) {
+                if (expected) anyWrong = true; // Expected something, got nothing
               } else {
-                if (items.length > 0) {
-                  z.style.borderColor = 'red';
-                } else {
-                  z.style.borderColor = defaultColor;
+                for (const item of items) {
+                  const isMatchByText = expected && item.textContent === expected;
+                  const isMatchByZone = item.dataset.correctZone === z.dataset.zone;
+                  
+                  if (isMatchByText || isMatchByZone) {
+                    hasCorrect = true;
+                  } else {
+                    anyWrong = true;
+                  }
                 }
+              }
+              
+              if (hasCorrect && !anyWrong) {
+                z.style.borderColor = 'green';
+                correct++;
+              } else if (anyWrong) {
+                z.style.borderColor = 'red';
+              } else {
+                // No items and none expected
+                z.style.borderColor = defaultColor;
               }
             });
             const dndFeedback = div.querySelector('#dndFeedback');

@@ -1,25 +1,17 @@
 {
   "name": "learning-modules",
   "version": "1.0.0",
-  "description": "Interaktive Lernmodule mit H5P - Electron Desktop App",
+  "description": "Interaktive Lernmodule mit H5P - Web-Server",
   "main": "src/main/main.js",
   "scripts": {
-    "start": "node scripts/start.js",
-    "start:windows": "electron .",
-    "start:linux": "node scripts/start.js",
-    "build": "electron-builder",
-    "build:linux": "electron-builder --linux",
-    "build:win": "electron-builder --win",
-    "build:mac": "electron-builder --mac",
-    "start:server": "node src/main/main.js --server",
+    "start": "node src/main/main.js",
     "build:docker": "docker build -t learningmodules-server:latest . && mkdir -p dist && docker save learningmodules-server:latest > dist/learningmodules-server.tar",
     "build:docker-arm64": "docker buildx build --platform linux/arm64 -t learningmodules-server:latest . --load && mkdir -p dist && docker save learningmodules-server:latest > dist/learningmodules-server.tar"
   },
   "keywords": [
     "h5p",
     "learning",
-    "education",
-    "electron"
+    "education"
   ],
   "author": "Martin Metzler <metzler@fes-es.de>",
   "license": "GPL-3.0",
@@ -31,53 +23,5 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "electron": "^35.7.5",
-    "electron-builder": "^26.8.1"
-  },
-  "build": {
-    "appId": "com.learningmodules.app",
-    "productName": "LearningModules",
-    "icon": "assets/icons/icon.png",
-    "directories": {
-      "output": "dist"
-    },
-    "files": [
-      "src/**/*",
-      "assets/**/*",
-      "node_modules/**/*"
-    ],
-    "linux": {
-      "target": [
-        {
-          "target": "AppImage",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "deb",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
-      ],
-      "icon": "assets/icons/",
-      "category": "Education"
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ],
-      "icon": "assets/icons/icon.ico",
-      "artifactName": "${productName}-Setup-${version}.${ext}",
-      "signAndEditExecutable": false
-    },
-    "mac": {
-      "target": [
-        "dmg"
-      ]
-    }
   }
 }
