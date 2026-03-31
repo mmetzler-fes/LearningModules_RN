@@ -5,8 +5,8 @@
   "main": "src/main/main.js",
   "scripts": {
     "start": "node src/main/main.js",
-    "build:docker": "docker build -t learningmodules-server:latest . && mkdir -p dist && docker save learningmodules-server:latest > dist/learningmodules-server.tar",
-    "build:docker-arm64": "docker buildx build --platform linux/arm64 -t learningmodules-server:latest . --load && mkdir -p dist && docker save learningmodules-server:latest > dist/learningmodules-server.tar"
+    "build:docker": "docker build -t learningmodules-server:latest . && mkdir -p dist && cp Dockerfile dist/ && docker save learningmodules-server:latest > dist/learningmodules-server.tar",
+    "build:docker-arm64": "docker buildx build --platform linux/arm64 -t learningmodules-server:latest . --load && mkdir -p dist && cp Dockerfile dist/ && docker save learningmodules-server:latest > dist/learningmodules-server.tar"
   },
   "keywords": [
     "h5p",
