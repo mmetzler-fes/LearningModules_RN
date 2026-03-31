@@ -1293,10 +1293,39 @@ function startWebServer() {
     res.json(req.authUser);
   });
 
-  // Public: client needs to know if empty student passwords are allowed before login
-  web.get('/api/auth/settings', (_req, res) => {
+  // Public: client needs to know if empty student passwords are allowed and if teacher login should be shown
+  web.get('/api/auth/settings', (req, res) => {
     const db = loadDB();
-    res.json({ allowEmptyStudentPassword: !!db.settings.allowEmptyStudentPassword });
+    const clientIp = req.ip || req.connection?.remoteAddress || '';
+    
+    // Check if teacher login should be shown based on IP filters
+    // Requirement from design doc: If filters are active and fail, don't show teacher login.
+    // Logic: If there is at least one teacher/admin with NO IP restriction, OR if the client matches at least one, show it.
+    const teachers = db.users.filter(u => u.role === 'admin' || u.role === 'teacher');
+    let showTeacherLogin = false;
+
+    if (teachers.length === 0) {
+      showTeacherLogin = true; // Still show if no users yet (for setup)
+    } else {
+      for (const t of teachers) {
+        const af = t.accessFilters || { ips: [] };
+        // If user has no IP filter, they can login from anywhere -> show login
+        if (!af.ips || af.ips.length === 0) {
+          showTeacherLogin = true;
+          break;
+        }
+        // If client IP matches their filter -> show login
+        if (af.ips.some(ip => clientIp.includes(ip))) {
+          showTeacherLogin = true;
+          break;
+        }
+      }
+    }
+
+    res.json({ 
+      allowEmptyStudentPassword: !!db.settings.allowEmptyStudentPassword,
+      showTeacherLogin 
+    });
   });
 
   // ---- ADMIN: SETTINGS ----

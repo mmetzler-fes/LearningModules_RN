@@ -247,7 +247,7 @@ const browserApi = {
   onMenuImport: () => {},
   onMenuExport: () => {},
   focusWindow: () => {},
-  getWebServerUrl: () => Promise.resolve(null),
+  getWebServerUrl: () => Promise.resolve(window.location.origin),
 };
 
 const appApi = isElectron ? window.api : browserApi;
@@ -665,14 +665,22 @@ function initModuleDescriptionEditor() {
 // ==================== LOGIN ====================
 
 async function initLoginScreen() {
-  // In browser mode: check if empty student passwords are allowed
+  // In browser mode: check if empty student passwords are allowed and if teacher login should be shown
   if (!isElectron) {
     try {
       const settings = await fetch('/api/auth/settings').then(r => r.json());
+      
+      // Update student password field visibility
       const studentPasswordField = document.getElementById('loginPassword');
       if (studentPasswordField) {
         studentPasswordField.required = !settings.allowEmptyStudentPassword;
         document.getElementById('loginPasswordGroup').classList.toggle('hidden', settings.allowEmptyStudentPassword);
+      }
+
+      // Update teacher login button visibility based on server filters
+      const adminToggle = document.getElementById('btnShowAdminLogin');
+      if (adminToggle) {
+        adminToggle.style.display = settings.showTeacherLogin ? '' : 'none';
       }
     } catch (_) {}
   }
@@ -4078,8 +4086,8 @@ async function init() {
   contentEditor = new ContentEditorManager(contentEditorEl);
   populateTypeSelects();
 
-  // Show network QR code for WLAN access (Electron only)
-  if (isElectron && appApi.getWebServerUrl) {
+  // Show network QR code for WLAN access (Electron AND Browser)
+  if (appApi.getWebServerUrl) {
     const showNetworkQr = async () => {
       try {
         const url = await appApi.getWebServerUrl();
@@ -4087,15 +4095,17 @@ async function init() {
           const qrDiv = document.getElementById('networkQr');
           const qrImg = document.getElementById('networkQrImg');
           const qrUrl = document.getElementById('networkQrUrl');
+          // In Browser mode, we can point directly to the API
           qrImg.src = url + '/api/qrcode.svg';
           qrUrl.textContent = url;
           qrDiv.classList.remove('hidden');
+          qrDiv.style.display = ''; // Ensure it's visible
           return true;
         }
       } catch (e) { /* ignore */ }
       return false;
     };
-    // Server may need a moment to start — retry a few times
+    // Let it run
     if (!(await showNetworkQr())) {
       let retries = 5;
       const timer = setInterval(async () => {
@@ -4104,15 +4114,13 @@ async function init() {
     }
   }
 
-  // In browser mode: show admin login (now supported via REST API)
+  // In browser mode: handle other initialization tasks
   if (!isElectron) {
-    // Restore admin login button visibility (was hidden in v1)
+    // Hide teacher login initially to prevent flickering before settings are fetched
     const adminToggle = document.getElementById('btnShowAdminLogin');
-    if (adminToggle) adminToggle.style.display = '';
-    // Hide network QR (only relevant for Electron host)
-    const netQr = document.getElementById('networkQr');
-    if (netQr) netQr.style.display = 'none';
-    // Init login screen (password field visibility)
+    if (adminToggle) adminToggle.style.display = 'none';
+
+    // Init login screen (password field visibility AND teacher login visibility from server)
     await initLoginScreen();
   }
 }
